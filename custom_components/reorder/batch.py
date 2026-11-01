@@ -9,7 +9,7 @@ ACTIVE = {"queued", "approved"}
 def eligible_orders(data, retailer="zinc"):
     return sorted((o for o in data["orders"].values()
                    if o.get("status") in ACTIVE and o.get("retailer") == retailer
-                   and not o.get("batch_id")), key=lambda o: o["created_at"])
+                   and not o.get("batch_id") and "zinc_environment" not in o), key=lambda o: o["created_at"])
 
 def preview(data, retailer="zinc", limit=10):
     orders = eligible_orders(data, retailer)[:limit]
@@ -40,7 +40,14 @@ async def create_batch(engine, retailer="zinc", max_items=10):
         engine.store.data.setdefault("batches", {})[batch_id] = batch
         for order in orders:
             order["batch_id"] = batch_id
-        await engine.store.save()
+        try:
+            await engine.store.save()
+        except Exception:
+            # A failed write must not leave a phantom batch in the running instance.
+            engine.store.data["batches"].pop(batch_id, None)
+            for order in orders:
+                order.pop("batch_id", None)
+            raise
     engine.publish()
     return batch
 

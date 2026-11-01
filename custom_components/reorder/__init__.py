@@ -1,9 +1,10 @@
 """Reorder: shopping list order queue with optional Zinc integration."""
-from homeassistant.core import HomeAssistant, ServiceCall, callback
+from homeassistant.core import HomeAssistant, ServiceCall, ServiceResponse, SupportsResponse, callback
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import config_validation as cv
 import voluptuous as vol
+from .notifications import async_notify
 from .const import DOMAIN
 from .store import ReorderStore
 from .core import ReorderEngine
@@ -64,6 +65,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         key = opts.get("zinc_api_key", "")
         if not key:
             raise HomeAssistantError("Configure Zinc credentials first")
+        if not key.startswith(("zn_test_", "zn_live_")):
+            raise HomeAssistantError("Use a Zinc sandbox or live API key")
         is_sandbox = key.startswith("zn_test_")
         if not is_sandbox and not opts.get("zinc_live_enabled", False):
             raise HomeAssistantError("Live Zinc ordering is disabled")
@@ -99,22 +102,26 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         except ValueError as err:
             raise HomeAssistantError(str(err)) from err
 
-    async def batch_preview(call: ServiceCall):
+    async def batch_preview(call: ServiceCall) -> ServiceResponse:
         report = preview(store.data)
-        hass.components.persistent_notification.async_create(
+        async_notify(
+            hass,
             f"{report['count']} eligible products; combined ceiling ${report['price_ceiling']:.2f}. "
             "Review individual products in the Reorder sensor attributes. This is not a price quote.",
             title="Reorder — Batch Preview", notification_id="reorder_batch_preview")
+        return report
 
-    async def prepare_batch(call: ServiceCall):
+    async def prepare_batch(call: ServiceCall) -> ServiceResponse:
         try:
             batch = await create_batch(engine, max_items=call.data.get("max_items", 10))
         except ValueError as err:
             raise HomeAssistantError(str(err)) from err
-        hass.components.persistent_notification.async_create(
+        async_notify(
+            hass,
             f"Batch {batch['id']} contains {len(batch['order_ids'])} product lines. "
             f"Price ceiling ${batch['max_price']:.2f}. No order placed.",
             title="Reorder — Batch Ready", notification_id=f"reorder_batch_{batch['id']}")
+        return dict(batch)
 
     async def submit_batch(call: ServiceCall):
         client, address, sandbox = zinc_settings()
@@ -149,16 +156,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 return
             settings["last_scheduled_date"] = local_date
             await store.save()
-            hass.components.persistent_notification.async_create(
+            async_notify(
+                hass,
                 f"Batch {batch['id']} is ready to review. No purchase was made.",
                 title="Reorder — Scheduled Batch", notification_id=f"reorder_batch_{batch['id']}")
 
     unsub_batch = async_track_time_interval(hass, check_scheduled, timedelta(minutes=15))
     entry.async_on_unload(unsub_batch)
 
-    hass.services.async_register(DOMAIN, "preview_batch", batch_preview)
+    hass.services.async_register(
+        DOMAIN, "preview_batch", batch_preview, supports_response=SupportsResponse.OPTIONAL
+    )
     hass.services.async_register(DOMAIN, "prepare_batch", prepare_batch, schema=vol.Schema({
-        vol.Optional("max_items", default=10): vol.All(vol.Coerce(int), vol.Range(min=1, max=10))}))
+        vol.Optional("max_items", default=10): vol.All(vol.Coerce(int), vol.Range(min=1, max=10))}),
+        supports_response=SupportsResponse.OPTIONAL)
     hass.services.async_register(DOMAIN, "submit_batch_zinc", submit_batch, schema=vol.Schema({
         vol.Required("batch_id"): cv.string, vol.Required("confirmation"): cv.string}))
     hass.services.async_register(DOMAIN, "refresh_batch_zinc", refresh_batch, schema=vol.Schema({

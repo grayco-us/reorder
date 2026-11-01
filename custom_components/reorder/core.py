@@ -6,6 +6,7 @@ from uuid import uuid4
 from urllib.parse import urlparse
 from homeassistant.core import callback
 from homeassistant.util import dt as dt_util
+from .notifications import async_notify
 from .const import EVENT_UPDATED
 
 _LOGGER = logging.getLogger(__name__)
@@ -77,7 +78,7 @@ class ReorderEngine:
             product = matches[0]
             now = dt_util.utcnow()
             prior = [o for o in self.store.data["orders"].values() if o["product_key"] == norm(product["name"])]
-            blocked = any(o["status"] in ("queued", "approved") for o in prior)
+            blocked = any(o["status"] in ("queued", "approved", "submitting", "submitted", "in_progress", "order_placed", "submission_unknown") for o in prior)
             if not blocked:
                 cutoff = now - timedelta(hours=product["cooldown_hours"])
                 blocked = any(o["created_at"] >= cutoff.isoformat() for o in prior)
@@ -98,7 +99,8 @@ class ReorderEngine:
             self.store.data["seen_items"] = self.store.data["seen_items"][-2000:]
             await self.store.save()
         self.publish()
-        self.hass.components.persistent_notification.async_create(
+        async_notify(
+            self.hass,
             f"{product['name']} matched your auto-reorder catalog. "
             f"Queued as {order_id}; no purchase was made.",
             title="Reorder — test order", notification_id=f"reorder_{order_id}")
@@ -154,13 +156,13 @@ class ReorderEngine:
         """Persist submitted state BEFORE network I/O to prevent accidental retries."""
         async with self.lock:
             order = self.store.data["orders"].get(order_id)
-            if order is None or order["status"] not in ("queued", "approved") or order.get("batch_id"):
+            if order is None or order["status"] not in ("queued", "approved") or order.get("batch_id") or "zinc_environment" in order:
                 raise ValueError("Order must be queued or approved")
             if order["retailer"] != "zinc":
                 raise ValueError("Order is not assigned to Zinc")
             if not order["product_id"].startswith("https://"):
                 raise ValueError("Zinc requires a full HTTPS product URL")
-            if any(o["product_key"] == order["product_key"] and o["status"] in ("submitting", "submitted", "in_progress", "order_placed") for o in self.store.data["orders"].values() if o["id"] != order_id):
+            if any(o["product_key"] == order["product_key"] and o["status"] in ("submitting", "submitted", "in_progress", "order_placed", "submission_unknown") for o in self.store.data["orders"].values() if o["id"] != order_id):
                 raise ValueError("Another order for this product is already active")
             order["status"] = "submitting"
             order["note"] = "Submission started; do not retry blindly if the connection fails."
@@ -169,6 +171,8 @@ class ReorderEngine:
         self.publish()
         try:
             response = await client.create_order(order, address)
+            if not isinstance(response, dict) or not (response.get("id") or response.get("order_id")):
+                raise ValueError("Zinc response missing order ID; reconcile before retrying")
         except Exception:
             async with self.lock:
                 order["status"] = "submission_unknown"
@@ -209,20 +213,30 @@ class ReorderEngine:
         """Explicit-only submission; ambiguous responses never cause automatic retries."""
         async with self.lock:
             batch = self.store.data.get("batches", {}).get(batch_id)
-            if not batch or batch["status"] != "ready":
+            if not batch or batch["status"] != "ready" or "zinc_environment" in batch:
                 raise ValueError("Batch must be ready for submission")
             orders = [self.store.data["orders"].get(i) for i in batch["order_ids"]]
             if any(o is None or o.get("status") not in ("queued", "approved") or
-                   o.get("batch_id") != batch_id for o in orders):
+                   o.get("batch_id") != batch_id or "zinc_environment" in o for o in orders):
                 raise ValueError("Batch contains an invalid or changed order")
+            if not 1 <= len(orders) <= 10 or len({o["product_key"] for o in orders}) != len(orders):
+                raise ValueError("Batch must contain 1–10 distinct catalog products")
+            product_keys = {o["product_key"] for o in orders}
+            if any(o["product_key"] in product_keys and o["id"] not in batch["order_ids"]
+                   and o["status"] in ("submitting", "submitted", "in_progress", "order_placed", "submission_unknown")
+                   for o in self.store.data["orders"].values()):
+                raise ValueError("Another order for a batch product is active or uncertain")
             batch["status"] = "submitting"
             batch["zinc_environment"] = "sandbox" if sandbox else "live"
             for order in orders:
                 order["status"] = "submitting"
+                order["zinc_environment"] = batch["zinc_environment"]
             await self.store.save()
         self.publish()
         try:
             response = await client.create_batch_order(batch, orders, address)
+            if not isinstance(response, dict) or not (response.get("id") or response.get("order_id")):
+                raise ValueError("Zinc response missing order ID; reconcile before retrying")
         except Exception:
             async with self.lock:
                 batch["status"] = "submission_unknown"

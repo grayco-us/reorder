@@ -2,6 +2,24 @@
 
 Home Assistant custom integration for routing exact, preapproved shopping-list items to a persistent order queue, with **Zinc API submission (sandbox first)**.
 
+## v0.4.1: Reliable batch actions
+
+Batch preview and preparation use Home Assistant's supported persistent notification API.
+Preparing a batch saves its ID and product assignments before displaying a notification.
+Notification failures are logged and do not report a failed preparation: check the
+**Prepared batches** sensor attributes or request the action response for the batch ID.
+Preview and preparation never submit purchases. See [batching and regression tests](BATCHING.md).
+
+Repeated or simultaneous preparation cannot assign the same queued order to multiple
+batches. If no unbatched eligible orders remain, the action reports `No eligible queued
+Zinc orders`. With additional eligible orders, a later call may prepare a separate,
+disjoint batch. Existing configurations and `reorder.catalog_v1` storage remain compatible.
+
+Submission is persisted before Zinc I/O. Attempted submissions cannot be reopened by
+provider status changes, and unknown outcomes require manual reconciliation with Zinc.
+Sandbox/live key checks, live opt-in, and exact confirmation phrases remain required.
+No real orders or payment credentials are used in automated tests.
+
 ## v0.3.1: Default quantity and ranked substitutions
 
 - Product catalog already supports `quantity` (1–20). Shopping-list `coffee` triggers the configured quantity, e.g. two bags, rather than quantity one.

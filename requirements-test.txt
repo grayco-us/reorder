@@ -1,0 +1,2 @@
+# Python 3.13; matches the Home Assistant version used for integration regression tests.
+homeassistant==2025.12.5

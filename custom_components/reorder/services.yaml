@@ -98,10 +98,10 @@ queue_next_substitution:
 
 preview_batch:
   name: Preview Zinc batch
-  description: Displays eligible queued products and combined spending ceiling. Makes no purchase.
+  description: Previews eligible products and spending ceiling without purchases. Supports an optional preview response.
 prepare_batch:
   name: Prepare Zinc batch
-  description: Locks up to 10 eligible product lines into a persistent, review-only batch.
+  description: Saves up to 10 unbatched product lines for review. Returns the saved batch when a response is requested; also available in Prepared batches sensor attributes. Notification failure does not undo creation.
   fields:
     max_items:
       selector:
