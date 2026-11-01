@@ -1,6 +1,35 @@
-
-    
-  
+{
+  "title": "Reorder",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Set up Reorder",
+        "description": "Configure Reorder shopping-list routing. Orders are queued locally until explicitly submitted."
+      }
+    },
+    "abort": {
+      "already_configured": "Reorder is already configured."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "menu_options": {
+          "add_product": "Add a product",
+          "edit_product": "Edit an existing product",
+          "remove_product": "Remove a product",
+          "zinc_settings": "Zinc API and delivery settings"
+        },
+        "title": "Manage Reorder",
+        "description": "Choose what you want to manage. Products are matched against the Home Assistant shopping list.",
+        "menu_option_descriptions": {
+          "add_product": "Choose a shopping-list name, exact product, quantity, and up to two substitutes.",
+          "edit_product": "Change products already approved for Reorder.",
+          "remove_product": "Delete an approved product from the catalog.",
+          "zinc_settings": "Set Zinc credentials, test/live behavior, and delivery address."
+        }
+      },
+      "add_product": {
         "title": "Add reorder product",
         "description": "Set what Reorder should match and queue. Saving this product does not place an order.",
         "data": {
