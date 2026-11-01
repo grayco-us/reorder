@@ -1,7 +1,7 @@
 {
   "domain": "reorder",
   "name": "Reorder",
-  "version": "0.3.2",
+  "version": "0.4.0",
   "config_flow": true,
   "dependencies": [
     "shopping_list"

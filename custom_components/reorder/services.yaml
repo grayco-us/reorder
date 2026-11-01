@@ -95,3 +95,37 @@ queue_next_substitution:
       required: true
       selector:
         text:
+
+preview_batch:
+  name: Preview Zinc batch
+  description: Displays eligible queued products and combined spending ceiling. Makes no purchase.
+prepare_batch:
+  name: Prepare Zinc batch
+  description: Locks up to 10 eligible product lines into a persistent, review-only batch.
+  fields:
+    max_items:
+      selector:
+        number:
+          min: 1
+          max: 10
+          mode: box
+submit_batch_zinc:
+  name: Submit Zinc batch
+  description: Sends a prepared batch to Zinc. Live transactions can spend money.
+  fields:
+    batch_id:
+      required: true
+      selector:
+        text:
+    confirmation:
+      required: true
+      description: SANDBOX for test credentials or PLACE LIVE ORDER for live credentials.
+      selector:
+        text:
+refresh_batch_zinc:
+  name: Refresh Zinc batch status
+  fields:
+    batch_id:
+      required: true
+      selector:
+        text:

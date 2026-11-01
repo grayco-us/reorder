@@ -7,7 +7,8 @@ from .const import DOMAIN, EVENT_UPDATED
 async def async_setup_entry(hass, entry, async_add_entities):
     engine = hass.data[DOMAIN][entry.entry_id]
     async_add_entities([ReorderSensor(engine, entry, "pending", "Queued orders"),
-                        ReorderSensor(engine, entry, "catalog", "Approved products")])
+                        ReorderSensor(engine, entry, "catalog", "Approved products"),
+                        ReorderSensor(engine, entry, "batches", "Prepared batches")])
 
 class ReorderSensor(SensorEntity):
     _attr_has_entity_name = True
@@ -20,12 +21,17 @@ class ReorderSensor(SensorEntity):
 
     @property
     def native_value(self):
+        if self.kind == "batches":
+            return sum(b["status"] == "ready" for b in self.engine.store.data.get("batches", {}).values())
         if self.kind == "pending":
             return sum(o["status"] == "queued" for o in self.engine.store.data["orders"].values())
         return sum(p["enabled"] for p in self.engine.store.data["products"].values())
 
     @property
     def extra_state_attributes(self):
+        if self.kind == "batches":
+            return {"batches": list(self.engine.store.data.get("batches", {}).values())[-25:],
+                    "settings": self.engine.store.data.get("batch_settings", {})}
         if self.kind == "pending":
             return {"orders": [o for o in self.engine.store.data["orders"].values() if o["status"] == "queued"][-25:]}
         return {"products": list(self.engine.store.data["products"].values())[:100]}

@@ -65,7 +65,7 @@ class ReorderOptionsFlow(config_entries.OptionsFlow):
         return self._engine().store.data["products"]
 
     async def async_step_init(self, user_input=None) -> FlowResult:
-        return self.async_show_menu(step_id="init", menu_options=["add_product", "edit_product", "remove_product", "zinc_settings"])
+        return self.async_show_menu(step_id="init", menu_options=["add_product", "edit_product", "remove_product", "zinc_settings", "batch_settings"])
 
     async def async_step_add_product(self, user_input=None) -> FlowResult:
         if user_input is not None:
@@ -146,3 +146,21 @@ class ReorderOptionsFlow(config_entries.OptionsFlow):
             # All parameters saved inside HA config entry options, not source code.
             return self.async_create_entry(title="Zinc settings updated", data={**options, **user_input})
         return self.async_show_form(step_id="zinc_settings", data_schema=vol.Schema(schema))
+
+    async def async_step_batch_settings(self, user_input=None) -> FlowResult:
+        """Configure schedule; scheduled runs only prepare batches for review."""
+        settings = self._engine().store.data.get("batch_settings", {})
+        schema = vol.Schema({
+            vol.Required("strategy", default=settings.get("strategy", "manual")): vol.In({
+                "manual": "Manual batching", "weekly": "Weekly review", "rolling": "Rolling window"}),
+            vol.Required("weekday", default=settings.get("weekday", 6)): vol.All(vol.Coerce(int), vol.Range(min=0, max=6)),
+            vol.Required("hour", default=settings.get("hour", 10)): vol.All(vol.Coerce(int), vol.Range(min=0, max=23)),
+            vol.Required("rolling_hours", default=settings.get("rolling_hours", 48)): vol.All(vol.Coerce(int), vol.Range(min=1, max=336)),
+        })
+        if user_input is not None:
+            self._engine().store.data["batch_settings"] = {
+                **settings, **user_input, "last_scheduled_date": None}
+            await self._engine().store.save()
+            self._engine().publish()
+            return self.async_create_entry(title="Batch schedule saved", data={})
+        return self.async_show_form(step_id="batch_settings", data_schema=schema)

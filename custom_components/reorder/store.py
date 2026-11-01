@@ -3,7 +3,7 @@ from copy import deepcopy
 from homeassistant.helpers.storage import Store
 from .const import STORAGE_VERSION, STORAGE_KEY
 
-DEFAULT = {"products": {}, "orders": {}, "seen_items": []}
+DEFAULT = {"products": {}, "orders": {}, "seen_items": [], "batches": {}, "batch_settings": {"strategy": "manual", "weekday": 6, "hour": 10, "rolling_hours": 48}}
 
 class ReorderStore:
     def __init__(self, hass):

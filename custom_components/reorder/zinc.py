@@ -35,3 +35,20 @@ class ZincClient:
     async def get_order(self, zinc_id):
         from urllib.parse import quote
         return await self.request("GET", "/orders/" + quote(str(zinc_id), safe=""))
+
+    async def create_batch_order(self, batch, orders, address):
+        """Submit a single retailer order containing multiple line items."""
+        if not orders or len(orders) > 10:
+            raise ValueError("Zinc batch must have 1–10 line items")
+        products = []
+        for order in orders:
+            url = order["product_id"]
+            if not url.startswith("https://"):
+                raise ValueError("All Zinc products must use HTTPS URLs")
+            products.append({"url": url, "quantity": order["quantity"]})
+        return await self.request("POST", "/orders", {
+            "products": products,
+            "max_price": round(batch["max_price"] * 100),
+            "idempotency_key": "reorder-batch-" + batch["id"],
+            "shipping_address": address,
+        })

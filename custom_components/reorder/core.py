@@ -141,6 +141,8 @@ class ReorderEngine:
             order = self.store.data["orders"].get(order_id)
             if order is None:
                 raise ValueError("Order ID not found")
+            if order.get("batch_id"):
+                raise ValueError("Order belongs to a batch; manage its batch instead")
             if order["status"] != "queued":
                 raise ValueError("Only queued orders can be modified")
             order["status"] = status
@@ -152,7 +154,7 @@ class ReorderEngine:
         """Persist submitted state BEFORE network I/O to prevent accidental retries."""
         async with self.lock:
             order = self.store.data["orders"].get(order_id)
-            if order is None or order["status"] not in ("queued", "approved"):
+            if order is None or order["status"] not in ("queued", "approved") or order.get("batch_id"):
                 raise ValueError("Order must be queued or approved")
             if order["retailer"] != "zinc":
                 raise ValueError("Order is not assigned to Zinc")
@@ -200,5 +202,59 @@ class ReorderEngine:
             else:
                 order["status"] = status
                 order["note"] = "Latest status checked with Zinc."
+            await self.store.save()
+        self.publish()
+
+    async def submit_batch_zinc(self, batch_id, client, address, sandbox):
+        """Explicit-only submission; ambiguous responses never cause automatic retries."""
+        async with self.lock:
+            batch = self.store.data.get("batches", {}).get(batch_id)
+            if not batch or batch["status"] != "ready":
+                raise ValueError("Batch must be ready for submission")
+            orders = [self.store.data["orders"].get(i) for i in batch["order_ids"]]
+            if any(o is None or o.get("status") not in ("queued", "approved") or
+                   o.get("batch_id") != batch_id for o in orders):
+                raise ValueError("Batch contains an invalid or changed order")
+            batch["status"] = "submitting"
+            batch["zinc_environment"] = "sandbox" if sandbox else "live"
+            for order in orders:
+                order["status"] = "submitting"
+            await self.store.save()
+        self.publish()
+        try:
+            response = await client.create_batch_order(batch, orders, address)
+        except Exception:
+            async with self.lock:
+                batch["status"] = "submission_unknown"
+                batch["note"] = "Reconcile with Zinc before retrying. Never resubmit blindly."
+                for order in orders:
+                    order["status"] = "submission_unknown"
+                await self.store.save()
+            self.publish()
+            raise
+        async with self.lock:
+            batch["zinc_order_id"] = response.get("id") or response.get("order_id")
+            batch["status"] = response.get("status", "submitted")
+            batch["note"] = "Zinc accepted batch request; fulfillment may still be pending."
+            for order in orders:
+                order["status"] = batch["status"]
+                order["zinc_order_id"] = batch.get("zinc_order_id")
+                order["zinc_environment"] = batch["zinc_environment"]
+            await self.store.save()
+        self.publish()
+
+    async def refresh_batch_zinc(self, batch_id, client):
+        async with self.lock:
+            batch = self.store.data.get("batches", {}).get(batch_id)
+            if not batch or not batch.get("zinc_order_id"):
+                raise ValueError("Batch has no Zinc order ID")
+            zinc_id = batch["zinc_order_id"]
+        result = await client.get_order(zinc_id)
+        status = result.get("status", "unknown")
+        async with self.lock:
+            batch["status"] = status
+            batch["note"] = "Refreshed with Zinc; inspect retailer status for partial failures."
+            for item_id in batch["order_ids"]:
+                self.store.data["orders"][item_id]["status"] = status
             await self.store.save()
         self.publish()

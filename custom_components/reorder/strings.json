@@ -18,7 +18,8 @@
           "add_product": "Add a product",
           "edit_product": "Edit an existing product",
           "remove_product": "Remove a product",
-          "zinc_settings": "Zinc API and delivery settings"
+          "zinc_settings": "Zinc API and delivery settings",
+          "batch_settings": "Batching schedule and preferences"
         },
         "title": "Manage Reorder",
         "description": "Choose what you want to manage. Products are matched against the Home Assistant shopping list.",
@@ -127,6 +128,22 @@
           "ship_state": "Two-letter state code.",
           "ship_postal_code": "ZIP code.",
           "ship_phone_number": "Contact number for the delivery."
+        }
+      },
+      "batch_settings": {
+        "title": "Batching schedule",
+        "description": "Scheduled and rolling modes ONLY prepare a batch for review; they never purchase automatically. Monday=0, Sunday=6. Time uses Home Assistant local time.",
+        "data": {
+          "strategy": "Batching strategy",
+          "weekday": "Day of week (Monday 0, Sunday 6)",
+          "hour": "Hour of day (0\u201323)",
+          "rolling_hours": "Rolling wait time (hours)"
+        },
+        "data_description": {
+          "strategy": "Manual requires you to prepare batches; weekly and rolling only mark batches ready.",
+          "weekday": "Only used for weekly schedule. Sunday=6.",
+          "hour": "Only used for weekly schedule. 10 means 10:00 AM.",
+          "rolling_hours": "Only used for rolling schedule, e.g. 48 means two days."
         }
       }
     },

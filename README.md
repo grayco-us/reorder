@@ -120,3 +120,9 @@ git push origin main
 ```
 
 Do not push a release tag until you've tested against Home Assistant and Zinc sandbox.
+
+## v0.4.0 — Batch queue (development)
+
+See [BATCHING.md](BATCHING.md) for the complete Gitea workflow, deployment and sandbox test instructions. Batches are review-first: schedules **never** submit transactions automatically. Prepared batches contain up to 10 distinct Zinc catalog items; quantities are retained and the sum of per-product price ceilings becomes the overall batch ceiling. `reorder.preview_batch`, `reorder.prepare_batch`, `reorder.submit_batch_zinc` and `reorder.refresh_batch_zinc` are available in Developer Tools → Actions.
+
+Do not enable live Zinc transactions until a sandbox order has successfully exercised the multi-line request and the provider's response handling has been checked. Partial fulfillment and per-product substitution inside a batch are not automated in this release.
