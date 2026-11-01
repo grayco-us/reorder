@@ -1,0 +1,114 @@
+
+    
+  
+        "title": "Add reorder product",
+        "description": "Set what Reorder should match and queue. Saving this product does not place an order.",
+        "data": {
+          "name": "Product name",
+          "aliases": "Other names that should match",
+          "retailer": "Ordering provider",
+          "product_id": "Preferred product URL or retailer ID",
+          "substitute_1": "First substitute (optional)",
+          "substitute_2": "Second substitute (optional)",
+          "quantity": "Units per order",
+          "max_price": "Maximum total order cost (USD)",
+          "cooldown_hours": "Minimum time between orders (hours)",
+          "enabled": "Enable shopping-list matching"
+        },
+        "data_description": {
+          "name": "Name on your shopping list, such as Coffee.",
+          "aliases": "Alternative shopping-list names, separated by commas. For example: coffee beans, ground coffee.",
+          "retailer": "Zinc supports purchasing. Kroger and Other are catalog placeholders in this release.",
+          "product_id": "For Zinc, enter the full retailer product URL. For Kroger, use the product identifier/UPC.",
+          "substitute_1": "Alternative product URL to try if the preferred product is confirmed out of stock.",
+          "substitute_2": "Another approved product URL if the first substitute is also unavailable.",
+          "quantity": "Number of units to order each time. Example: 2 bags of coffee.",
+          "max_price": "Maximum combined amount for the order, including shipping and tax; also applies to substitutions.",
+          "cooldown_hours": "Prevent repeat orders within this period. 168 hours equals 7 days.",
+          "enabled": "Turn off to stop Reorder from matching this catalog entry."
+        }
+      },
+      "edit_product": {
+        "title": "Choose a product to edit",
+        "data": {
+          "product": "Product"
+        },
+        "data_description": {
+          "product": "Select the approved catalog item you want to change."
+        }
+      },
+      "update_product": {
+        "title": "Edit reorder product",
+        "data": {
+          "name": "Product name",
+          "aliases": "Other names that should match",
+          "retailer": "Ordering provider",
+          "product_id": "Preferred product URL or retailer ID",
+          "substitute_1": "First substitute (optional)",
+          "substitute_2": "Second substitute (optional)",
+          "quantity": "Units per order",
+          "max_price": "Maximum total order cost (USD)",
+          "cooldown_hours": "Minimum time between orders (hours)",
+          "enabled": "Enable shopping-list matching"
+        },
+        "description": "Set what Reorder should match and queue. Saving this product does not place an order.",
+        "data_description": {
+          "name": "Name on your shopping list, such as Coffee.",
+          "aliases": "Alternative shopping-list names, separated by commas. For example: coffee beans, ground coffee.",
+          "retailer": "Zinc supports purchasing. Kroger and Other are catalog placeholders in this release.",
+          "product_id": "For Zinc, enter the full retailer product URL. For Kroger, use the product identifier/UPC.",
+          "substitute_1": "Alternative product URL to try if the preferred product is confirmed out of stock.",
+          "substitute_2": "Another approved product URL if the first substitute is also unavailable.",
+          "quantity": "Number of units to order each time. Example: 2 bags of coffee.",
+          "max_price": "Maximum combined amount for the order, including shipping and tax; also applies to substitutions.",
+          "cooldown_hours": "Prevent repeat orders within this period. 168 hours equals 7 days.",
+          "enabled": "Turn off to stop Reorder from matching this catalog entry."
+        }
+      },
+      "remove_product": {
+        "title": "Remove approved product",
+        "data": {
+          "product": "Product"
+        },
+        "data_description": {
+          "product": "Select the approved catalog item to remove."
+        }
+      },
+      "zinc_settings": {
+        "title": "Zinc settings",
+        "description": "Use a zn_test_ key for sandbox orders. Live mode permits actual spending only through an explicitly confirmed action. Shipping details remain in Home Assistant storage.",
+        "data": {
+          "zinc_api_key": "Zinc API key",
+          "zinc_live_enabled": "Enable live Zinc purchasing",
+          "ship_first_name": "First name",
+          "ship_last_name": "Last name",
+          "ship_address_line1": "Address line 1",
+          "ship_city": "City",
+          "ship_state": "State (two-letter code)",
+          "ship_postal_code": "ZIP code",
+          "ship_phone_number": "Phone number"
+        },
+        "data_description": {
+          "zinc_api_key": "Use a Zinc sandbox key while testing. Keep API keys out of Git.",
+          "zinc_live_enabled": "Leave off during development. Enabling live mode can permit real orders through a separately confirmed action.",
+          "ship_first_name": "Recipient given name.",
+          "ship_last_name": "Recipient family name.",
+          "ship_address_line1": "Street address for shipping.",
+          "ship_city": "Shipping city.",
+          "ship_state": "Two-letter state code.",
+          "ship_postal_code": "ZIP code.",
+          "ship_phone_number": "Contact number for the delivery."
+        }
+      }
+    },
+    "error": {
+      "required_fields": "Enter a product name and product ID.",
+      "already_exists": "A product with this name already exists.",
+      "live_key_required": "Live mode requires a zn_live_ API key."
+    },
+    "abort": {
+      "empty_catalog": "Add a product first.",
+      "product_missing": "That product no longer exists."
+    }
+  }
+}
