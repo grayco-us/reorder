@@ -1,0 +1,93 @@
+{
+  "title": "Reorder",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Set up Reorder",
+        "description": "Configure Reorder shopping-list routing. Orders are queued locally until explicitly submitted."
+      }
+    },
+    "abort": {
+      "already_configured": "Reorder is already configured."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "menu_options": {
+          "add_product": "Add a product",
+          "edit_product": "Edit a product",
+          "remove_product": "Remove a product",
+          "zinc_settings": "Zinc API and shipping settings"
+        }
+      },
+      "add_product": {
+        "title": "Add approved product",
+        "description": "Adding to shopping list only queues an order. Zinc submission requires a separate, confirmed action.",
+        "data": {
+          "name": "Product name",
+          "aliases": "Alternate shopping-list names (comma-separated)",
+          "retailer": "Preferred retailer",
+          "product_id": "Retailer product ID or UPC",
+          "quantity": "Quantity",
+          "max_price": "Maximum total order amount (USD)",
+          "cooldown_hours": "Minimum hours between orders",
+          "enabled": "Enable matching",
+          "substitute_1": "First replacement product URL (optional)",
+          "substitute_2": "Second replacement product URL (optional)"
+        }
+      },
+      "edit_product": {
+        "title": "Choose a product to edit",
+        "data": {
+          "product": "Product"
+        }
+      },
+      "update_product": {
+        "title": "Edit approved product",
+        "data": {
+          "name": "Product name",
+          "aliases": "Aliases (comma-separated)",
+          "retailer": "Preferred retailer",
+          "product_id": "Product ID or UPC",
+          "quantity": "Quantity",
+          "max_price": "Maximum total order amount (USD)",
+          "cooldown_hours": "Cooldown hours",
+          "enabled": "Enable matching",
+          "substitute_1": "First replacement product URL (optional)",
+          "substitute_2": "Second replacement product URL (optional)"
+        }
+      },
+      "remove_product": {
+        "title": "Remove approved product",
+        "data": {
+          "product": "Product"
+        }
+      },
+      "zinc_settings": {
+        "title": "Zinc settings",
+        "description": "Use a zn_test_ key for sandbox orders. Live mode permits actual spending only through an explicitly confirmed action. Shipping details remain in Home Assistant storage.",
+        "data": {
+          "zinc_api_key": "Zinc API key",
+          "zinc_live_enabled": "Enable live Zinc purchasing",
+          "ship_first_name": "First name",
+          "ship_last_name": "Last name",
+          "ship_address_line1": "Address line 1",
+          "ship_city": "City",
+          "ship_state": "State (two-letter code)",
+          "ship_postal_code": "ZIP code",
+          "ship_phone_number": "Phone number"
+        }
+      }
+    },
+    "error": {
+      "required_fields": "Enter a product name and product ID.",
+      "already_exists": "A product with this name already exists.",
+      "live_key_required": "Live mode requires a zn_live_ API key."
+    },
+    "abort": {
+      "empty_catalog": "Add a product first.",
+      "product_missing": "That product no longer exists."
+    }
+  }
+}

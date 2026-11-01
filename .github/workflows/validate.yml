@@ -1,0 +1,28 @@
+name: Validate Reorder
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Compile Python source
+        run: python -m compileall -q custom_components/reorder tests
+      - name: Check JSON files
+        run: python -c 'import json,pathlib; [json.loads(p.read_text()) for p in pathlib.Path("custom_components/reorder").glob("*.json")]; json.loads(pathlib.Path("hacs.json").read_text())'
+      - name: Check manifest and repository layout
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          d = json.loads(Path('custom_components/reorder/manifest.json').read_text())
+          assert d['domain'] == 'reorder'
+          assert d['config_flow'] is True
+          assert d['version']
+          assert list(Path('custom_components').iterdir()) == [Path('custom_components/reorder')]
+          PY

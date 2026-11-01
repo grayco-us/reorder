@@ -1,0 +1,97 @@
+set_product:
+  name: Add or update approved product
+  description: Register an approved product. Shopping-list adds only queue orders.
+  fields:
+    name:
+      required: true
+      selector:
+        text:
+    aliases:
+      selector:
+        object:
+    retailer:
+      required: true
+      selector:
+        select:
+          options:
+            - zinc
+            - kroger
+            - other
+    product_id:
+      required: true
+      selector:
+        text:
+    substitutes:
+      description: Up to two ranked HTTPS fallback product URLs. Zinc only.
+      selector:
+        object:
+    quantity:
+      selector:
+        number:
+          min: 1
+          max: 20
+    max_price:
+      selector:
+        number:
+          min: 1
+          max: 10000
+          step: 0.01
+    cooldown_hours:
+      selector:
+        number:
+          min: 1
+          max: 8760
+    enabled:
+      selector:
+        boolean:
+remove_product:
+  name: Remove approved product
+  fields:
+    name:
+      required: true
+      selector:
+        text:
+approve_order:
+  name: Approve simulated order
+  description: Marks a test order approved; does not place an order.
+  fields:
+    order_id:
+      required: true
+      selector:
+        text:
+cancel_order:
+  name: Cancel simulated order
+  fields:
+    order_id:
+      required: true
+      selector:
+        text:
+submit_zinc:
+  name: Submit Zinc order
+  description: Sends a queued Zinc order to the API. Requires SANDBOX for test keys or PLACE LIVE ORDER for live keys. This action can spend real money if live is enabled.
+  fields:
+    order_id:
+      required: true
+      selector:
+        text:
+    confirmation:
+      required: true
+      selector:
+        text:
+refresh_zinc:
+  name: Refresh Zinc order
+  description: Fetch the latest order status from Zinc (on demand, no polling).
+  fields:
+    order_id:
+      required: true
+      selector:
+        text:
+
+queue_next_substitution:
+  name: Queue next approved substitution
+  description: Only works after a Zinc order is confirmed out_of_stock. Creates a new queued order, never automatically buys.
+  fields:
+    order_id:
+      required: true
+      selector:
+        text:
