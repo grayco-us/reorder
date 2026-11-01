@@ -1,6 +1,35 @@
+"""Native UI setup and catalog administration for Reorder by Grayco."""
+from __future__ import annotations
 
-    
-  
+import voluptuous as vol
+from homeassistant import config_entries
+from homeassistant.data_entry_flow import FlowResult
+from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers.selector import SelectSelector, SelectSelectorConfig, SelectOptionDict
+
+from .const import DOMAIN
+from .core import norm
+
+RETAILERS = SelectSelector(
+    SelectSelectorConfig(
+        options=[
+            SelectOptionDict(value="zinc", label="Zinc — supported purchasing provider"),
+            SelectOptionDict(value="kroger", label="Kroger — cart integration planned"),
+            SelectOptionDict(value="other", label="Other — catalog only"),
+        ],
+        mode="dropdown",
+    )
+)
+
+
+def product_schema(product: dict | None = None) -> vol.Schema:
+    """Form for an approved product. Aliases are entered comma-separated."""
+    p = product or {}
+    return vol.Schema({
+        vol.Required("name", default=p.get("name", "")): cv.string,
+        vol.Optional("aliases", default=", ".join(p.get("aliases", []))): cv.string,
+        vol.Required("retailer", default=p.get("retailer", "zinc")): RETAILERS,
+        vol.Required("product_id", default=p.get("product_id", "")): cv.string,
         vol.Optional("substitute_1", default=p.get("substitutes", [""])[0] if p.get("substitutes") else ""): cv.string,
         vol.Optional("substitute_2", default=(p.get("substitutes", ["", ""])[1] if len(p.get("substitutes", [])) > 1 else "")): cv.string,
         vol.Required("quantity", default=p.get("quantity", 1)): vol.All(vol.Coerce(int), vol.Range(min=1, max=20)),
@@ -117,4 +146,3 @@ class ReorderOptionsFlow(config_entries.OptionsFlow):
             # All parameters saved inside HA config entry options, not source code.
             return self.async_create_entry(title="Zinc settings updated", data={**options, **user_input})
         return self.async_show_form(step_id="zinc_settings", data_schema=vol.Schema(schema))
-
