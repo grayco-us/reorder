@@ -1,4 +1,4 @@
-# Reorder v0.4.4 — Batch testing
+# Reorder v0.4.5 — Batch testing
 
 **Development preview. No scheduled payments.** A weekly/rolling schedule only creates a persistent batch marked `ready`.
 
@@ -168,3 +168,12 @@ layout. It lists saved batches and their mode/status, and provides a batch selec
 with review, refresh, and local cancellation buttons. No submission or purchasing
 control is included. Selected batch state is transient and resets after restart or
 integration reload; batch records remain unchanged.
+
+## Inline batch review (v0.4.5)
+
+The current dashboard shows the selected batch's saved product lines and spending
+limits inline, without calling `review_batch` or generating a notification. Status
+labels are readable and times use Home Assistant's local timezone. Re-import the
+updated YAML after deploying v0.4.5; it does not overwrite customized dashboards.
+Existing notification-based review remains supported, with no changes to saved
+batch status values, entity IDs, or purchasing safeguards.

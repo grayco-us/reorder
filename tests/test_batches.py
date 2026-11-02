@@ -575,7 +575,7 @@ class BatchActionsTest(unittest.IsolatedAsyncioTestCase):
         await self.press_batch_button("cancel")
         self.assertEqual(self.engine.store.data["batches"][batch["id"]]["status"], "canceled")
         self.assertEqual(self.hass.states.get("button.reorder_cancel_batch").state, "unavailable")
-        self.assertEqual(self.hass.states.get("select.reorder_batch").state, batch["id"] + " — canceled")
+        self.assertEqual(self.hass.states.get("select.reorder_batch").state, batch["id"] + " — Canceled")
         self.transport.assert_not_awaited()
 
     async def test_dashboard_refresh_never_submits_and_updates_selected_label(self):
@@ -587,7 +587,7 @@ class BatchActionsTest(unittest.IsolatedAsyncioTestCase):
         self.transport.return_value = {"id": "mock-zinc-id", "status": "order_placed"}
         await self.press_batch_button("refresh")
         self.transport.assert_awaited_once_with("GET", "/orders/mock-zinc-id")
-        self.assertEqual(self.hass.states.get("select.reorder_batch").state, batch["id"] + " — order_placed")
+        self.assertEqual(self.hass.states.get("select.reorder_batch").state, batch["id"] + " — Order placed")
 
     async def test_dashboard_mode_changes_without_exposing_credentials(self):
         await self.hass.async_block_till_done()
@@ -633,11 +633,12 @@ class BatchActionsTest(unittest.IsolatedAsyncioTestCase):
         import yaml
         from homeassistant.helpers.template import Template
         dashboard = yaml.safe_load((Path(__file__).resolve().parents[1] / "dashboards/reorder.yaml").read_text())
-        cards = [card for card in dashboard["views"][0]["cards"] if card["type"] == "markdown"]
+        cards = [card for section in dashboard["views"][0]["sections"]
+                 for card in section["cards"] if card["type"] == "markdown"]
         await self.hass.async_block_till_done()
         empty = "\n".join(str(Template(card["content"], self.hass).async_render()) for card in cards)
         self.assertIn("No prepared batches", empty)
-        self.assertIn("Sandbox", empty)
+        self.assertEqual(self.hass.states.get("sensor.reorder_purchasing_mode").state, "Sandbox")
         batch = await self.prepare()
         await self.hass.async_block_till_done()
         populated = "\n".join(str(Template(card["content"], self.hass).async_render()) for card in cards)
@@ -646,8 +647,85 @@ class BatchActionsTest(unittest.IsolatedAsyncioTestCase):
         await self.submit(batch)
         await self.hass.async_block_till_done()
         submitted = "\n".join(str(Template(card["content"], self.hass).async_render()) for card in cards)
-        self.assertIn("submitted", submitted)
-        self.assertIn("sandbox", submitted)
+        self.assertIn("Submitted", submitted)
+        self.assertIn("Sandbox", submitted)
+
+    async def render_batch_contents(self):
+        import yaml
+        from homeassistant.helpers.template import Template
+        dashboard = yaml.safe_load((Path(__file__).resolve().parents[1] / "dashboards/reorder.yaml").read_text())
+        card = next(card for section in dashboard["views"][0]["sections"] for card in section["cards"]
+                    if card.get("title") == "Batch contents")
+        return str(Template(card["content"], self.hass).async_render())
+
+    async def test_selected_contents_appear_inline_without_notification_or_network(self):
+        batch = await self.prepare()
+        self.engine.store.data["products"]["product 1"] = {"name": "Edited catalog", "quantity": 9}
+        before = deepcopy(self.engine.store.data)
+        notifications = deepcopy(self.hass.data["persistent_notification"])
+        await self.select_batch(batch)
+        attributes = self.hass.states.get("select.reorder_batch").attributes
+        self.assertEqual(attributes["batch"]["status_label"], "Ready for review")
+        self.assertEqual(attributes["orders"][0]["name"], "Product 1")
+        self.assertEqual(attributes["orders"][0]["quantity"], 2)
+        rendered = await self.render_batch_contents()
+        self.assertIn('href="https://example.com/product/1"', rendered)
+        self.assertIn("Product 1", rendered)
+        self.assertIn("<td>2</td>", rendered)
+        self.assertIn("Total ceiling: $12.50", rendered)
+        self.assertNotIn("Edited catalog", rendered)
+        self.assertEqual(self.engine.store.data, before)
+        self.assertEqual(self.hass.data["persistent_notification"], notifications)
+        self.transport.assert_not_awaited()
+
+    async def test_inline_review_switches_products_with_batch_selection(self):
+        first = await self.prepare()
+        self.engine.store.data["orders"]["2"] = order(2)
+        second = await self.prepare()
+        await self.select_batch(first)
+        self.assertIn("Product 1", await self.render_batch_contents())
+        await self.select_batch(second)
+        rendered = await self.render_batch_contents()
+        self.assertIn("Product 2", rendered)
+        self.assertNotIn("Product 1", rendered)
+        self.transport.assert_not_awaited()
+
+    async def test_inline_review_handles_no_selection_and_missing_order(self):
+        await self.hass.async_block_till_done()
+        self.assertIn("Choose a batch above", await self.render_batch_contents())
+        batch = await self.prepare()
+        self.engine.store.data["orders"].pop("1")
+        await self.select_batch(batch)
+        attributes = self.hass.states.get("select.reorder_batch").attributes
+        self.assertIsNone(attributes["batch"])
+        self.assertEqual(attributes["orders"], [])
+        self.assertIn("incomplete or unavailable", await self.render_batch_contents())
+        self.transport.assert_not_awaited()
+
+    async def test_inline_review_includes_batches_older_than_history_window(self):
+        oldest = await self.prepare()
+        for index in range(2, 28):
+            self.engine.store.data["orders"][str(index)] = order(index)
+            await self.prepare()
+        await self.select_batch(oldest)
+        history = self.hass.states.get("sensor.prepared_batches").attributes["batches"]
+        self.assertNotIn(oldest["id"], [batch["id"] for batch in history])
+        self.assertIn("Product 1", await self.render_batch_contents())
+        self.transport.assert_not_awaited()
+
+    async def test_inline_review_escapes_names_and_formats_refresh_time(self):
+        self.engine.store.data["orders"]["1"]["name"] = '<script>alert("test")</script> | Coffee'
+        batch = await self.prepare()
+        await self.submit(batch)
+        saved = self.engine.store.data["batches"][batch["id"]]
+        saved["last_refreshed_at"] = "2026-11-02T13:55:57.137041+00:00"
+        await self.select_batch(batch)
+        rendered = await self.render_batch_contents()
+        self.assertIn("&lt;script&gt;", rendered)
+        self.assertNotIn("<script>", rendered)
+        self.assertIn("Nov 02, 2026 at 08:55 AM", rendered)
+        self.assertNotIn("2026-11-02T13:55", rendered)
+        self.assertIn("Submitted", rendered)
 
     async def test_missing_shipping_address_blocks_submission(self):
         batch = await self.prepare()
@@ -697,7 +775,7 @@ class DashboardConfigTest(unittest.TestCase):
         import yaml
         config = yaml.safe_load((Path(__file__).resolve().parents[1] / "dashboards/reorder.yaml").read_text())
         actions = []
-        allowed_cards = {"markdown", "entities", "button", "horizontal-stack"}
+        allowed_cards = {"markdown", "entities", "button", "horizontal-stack", "sections", "grid", "heading"}
         def inspect(node):
             if isinstance(node, dict):
                 if "type" in node:

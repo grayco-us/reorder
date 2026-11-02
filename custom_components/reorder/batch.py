@@ -6,6 +6,17 @@ from homeassistant.util import dt as dt_util
 
 ACTIVE = {"queued", "approved"}
 
+
+def batch_status_label(status):
+    """Readable display names without changing persisted/provider status values."""
+    return {
+        "ready": "Ready for review", "pending": "Pending", "submitting": "Submitting",
+        "submitted": "Submitted", "in_progress": "In progress", "order_placed": "Order placed",
+        "failed": "Failed", "order_failed": "Failed", "canceled": "Canceled",
+        "cancelled": "Canceled", "cancelled_by_retailer": "Canceled by retailer",
+        "submission_unknown": "Needs reconciliation",
+    }.get(status, str(status).replace("_", " ").capitalize())
+
 def eligible_orders(data, retailer="zinc"):
     return sorted((o for o in data["orders"].values()
                    if o.get("status") in ACTIVE and o.get("retailer") == retailer

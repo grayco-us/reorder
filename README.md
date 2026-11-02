@@ -2,6 +2,19 @@
 
 Home Assistant custom integration for routing exact, preapproved shopping-list items to a persistent order queue, with **Zinc API submission (sandbox first)**.
 
+## v0.4.5: Review batch contents inline
+
+Selecting a batch now displays its saved products, clickable product links,
+quantities, individual price ceilings, and total ceiling directly on the dashboard.
+No Review button or notification is required. A two-section layout keeps the batch
+selector, details, and controls together, with the queue and history alongside them.
+Statuses have readable display labels; timestamps use Home Assistant's local timezone.
+
+Update the integration and re-import [the dashboard YAML](dashboards/reorder.yaml)
+to use the new layout. Existing dashboards are not automatically overwritten. Raw
+provider status values, entity IDs, and stored batches remain unchanged. The existing
+review action and button continue to work for callers using notification-based review.
+
 ## v0.4.4: Native Reorder dashboard
 
 A [starter dashboard](dashboards/reorder.yaml) now shows ready and submitted/past

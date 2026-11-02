@@ -1,6 +1,7 @@
 """Dashboard entities for order queue and catalog."""
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.core import callback
+from .batch import batch_status_label
 from .const import DOMAIN, EVENT_UPDATED
 
 async def async_setup_entry(hass, entry, async_add_entities):
@@ -41,7 +42,8 @@ class ReorderSensor(SensorEntity):
         if self.kind == "mode":
             return {"live_enabled": self.entry.options.get("zinc_live_enabled", False)}
         if self.kind == "batches":
-            return {"batches": list(self.engine.store.data.get("batches", {}).values())[-25:],
+            return {"batches": [{**batch, "status_label": batch_status_label(batch["status"])}
+                                for batch in list(self.engine.store.data.get("batches", {}).values())[-25:]],
                     "settings": self.engine.store.data.get("batch_settings", {})}
         if self.kind == "pending":
             return {"orders": [o for o in self.engine.store.data["orders"].values() if o["status"] == "queued"][-25:]}

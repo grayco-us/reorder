@@ -2,6 +2,7 @@
 from homeassistant.components.select import SelectEntity
 from homeassistant.core import callback
 
+from .batch import batch_status_label, review_batch
 from .const import DOMAIN, EVENT_UPDATED
 
 
@@ -22,7 +23,7 @@ class ReorderBatchSelect(SelectEntity):
 
     def _choices(self):
         batches = self.engine.store.data.get("batches", {}).values()
-        return {f"{batch['id']} — {batch['status']}": batch["id"] for batch in
+        return {f"{batch['id']} — {batch_status_label(batch['status'])}": batch["id"] for batch in
                 sorted(batches, key=lambda batch: batch["created_at"], reverse=True)}
 
     @property
@@ -36,7 +37,21 @@ class ReorderBatchSelect(SelectEntity):
 
     @property
     def extra_state_attributes(self):
-        return {"batch_id": self.engine.selected_batch_id}
+        attributes = {"batch_id": self.engine.selected_batch_id, "batch": None,
+                      "orders": [], "review_error": None}
+        if self.engine.selected_batch_id is None:
+            return attributes
+        try:
+            report = review_batch(self.engine.store.data, self.engine.selected_batch_id)
+        except (ValueError, KeyError, TypeError):
+            attributes["review_error"] = "Saved batch details are incomplete or unavailable. No order was changed."
+            return attributes
+        fields = ("id", "status", "created_at", "max_price", "zinc_environment",
+                  "zinc_order_id", "last_refreshed_at", "canceled_at")
+        attributes["batch"] = {key: report[key] for key in fields if key in report}
+        attributes["batch"]["status_label"] = batch_status_label(report["status"])
+        attributes["orders"] = report["orders"]
+        return attributes
 
     async def async_select_option(self, option):
         batch_id = self._choices().get(option)
