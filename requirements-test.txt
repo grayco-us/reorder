@@ -1,0 +1,6 @@
+# Python 3.13; matches the Home Assistant version used for integration regression tests.
+homeassistant==2025.12.5
+# Frontend is an integration requirement, not part of the base HA wheel. Install
+# before the test process starts instead of relying on HA's runtime installer.
+# Must match homeassistant/components/frontend/manifest.json for the HA pin above.
+home-assistant-frontend==20251203.3

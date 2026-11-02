@@ -1,0 +1,129 @@
+title: Reorder
+views:
+  - title: Reorder
+    path: reorder
+    icon: mdi:cart-outline
+    type: sections
+    max_columns: 2
+    sections:
+      - type: grid
+        cards:
+          - type: heading
+            heading: Batch review
+            icon: mdi:clipboard-text-search-outline
+          - type: entities
+            show_header_toggle: false
+            entities:
+              - entity: select.reorder_batch
+                name: Choose a batch
+          - type: markdown
+            title: Batch contents
+            content: |-
+              {% set batch = state_attr('select.reorder_batch', 'batch') %}
+              {% set orders = state_attr('select.reorder_batch', 'orders') or [] %}
+              {% set error = state_attr('select.reorder_batch', 'review_error') %}
+              {% if error %}
+              {{ error }}
+              {% elif batch %}
+              **{{ batch.status_label }}** · {{ batch.zinc_environment | default('Not submitted') | capitalize }}
+
+              Batch `{{ batch.id }}`
+
+              {% set created = as_timestamp(batch.created_at | default(none), none) %}
+              {% if created is not none %}Created: {{ created | timestamp_custom('%b %d, %Y at %I:%M %p') }}{% endif %}
+              {% set refreshed = as_timestamp(batch.last_refreshed_at | default(none), none) %}
+              {% if refreshed is not none %}Last refreshed: {{ refreshed | timestamp_custom('%b %d, %Y at %I:%M %p') }}{% endif %}
+              {% set canceled = as_timestamp(batch.canceled_at | default(none), none) %}
+              {% if canceled is not none %}Canceled: {{ canceled | timestamp_custom('%b %d, %Y at %I:%M %p') }}{% endif %}
+
+              <table>
+                <thead><tr><th>Product</th><th>Quantity</th><th>Price ceiling</th></tr></thead>
+                <tbody>
+                {% for order in orders %}
+                <tr><td>{% if order.product_id.startswith('https://') %}<a href="{{ order.product_id | e }}" target="_blank" rel="noopener noreferrer">{{ order.name | e }}</a>{% else %}{{ order.name | e }}{% endif %}</td><td>{{ order.quantity }}</td><td>${{ '%.2f' | format(order.max_price) }}</td></tr>
+                {% endfor %}
+                </tbody>
+              </table>
+
+              **Total ceiling: ${{ '%.2f' | format(batch.max_price) }}**
+
+              Price ceilings are spending limits, not quotes.
+              {% else %}
+              Choose a batch above to see its products, quantities, spending limits, and saved status here.
+              {% endif %}
+          - type: horizontal-stack
+            cards:
+              - type: button
+                entity: button.reorder_refresh_batch
+                name: Refresh status
+                tap_action:
+                  action: perform-action
+                  perform_action: button.press
+                  target:
+                    entity_id: button.reorder_refresh_batch
+              - type: button
+                entity: button.reorder_cancel_batch
+                name: Cancel locally
+                tap_action:
+                  action: perform-action
+                  perform_action: button.press
+                  target:
+                    entity_id: button.reorder_cancel_batch
+                  confirmation:
+                    text: Cancel this unsubmitted batch AND its queued orders? They remain in history and will not be queued again automatically. This does not cancel retailer purchases.
+      - type: grid
+        cards:
+          - type: heading
+            heading: Queue & history
+            icon: mdi:package-variant
+          - type: entities
+            title: Overview
+            show_header_toggle: false
+            entities:
+              - entity: sensor.reorder_purchasing_mode
+                name: Purchasing mode
+              - entity: sensor.prepared_batches
+                name: Ready for review
+              - entity: sensor.queued_orders
+                name: Queued product lines
+              - entity: sensor.approved_products
+                name: Enabled catalog products
+          - type: horizontal-stack
+            cards:
+              - type: button
+                name: Preview queue
+                icon: mdi:clipboard-list-outline
+                tap_action:
+                  action: perform-action
+                  perform_action: reorder.preview_batch
+              - type: button
+                name: Prepare batch
+                icon: mdi:package-variant-closed-plus
+                tap_action:
+                  action: perform-action
+                  perform_action: reorder.prepare_batch
+                  data:
+                    max_items: 10
+          - type: markdown
+            title: Ready for review
+            content: |-
+              {% set batches = state_attr('sensor.prepared_batches', 'batches') or [] %}
+              {% set ready = batches | selectattr('status', 'eq', 'ready') | list %}
+              {% for batch in ready | reverse %}
+              - **{{ batch.id }}** — {{ batch.order_ids | count }} product line(s), ceiling **${{ '%.2f' | format(batch.max_price) }}**
+              {% else %}
+              No prepared batches waiting for review.
+              {% endfor %}
+          - type: markdown
+            title: Submitted and past batches
+            content: |-
+              {% set batches = state_attr('sensor.prepared_batches', 'batches') or [] %}
+              {% for batch in batches | rejectattr('status', 'eq', 'ready') | reverse %}
+              - **{{ batch.id }}** — **{{ batch.status_label }}** · {{ batch.zinc_environment | default('local') | capitalize }}
+                {% set refreshed = as_timestamp(batch.last_refreshed_at | default(none), none) %}
+                {% if refreshed is not none %}Updated {{ refreshed | timestamp_custom('%b %d, %Y at %I:%M %p') }}{% endif %}
+              {% else %}
+              No submitted or canceled batches yet.
+              {% endfor %}
+
+              Most recent 25 batches shown. Use the selector to review older batches.

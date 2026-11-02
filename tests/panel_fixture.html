@@ -1,0 +1,88 @@
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Reorder sidebar fixture</title><style>html,body{margin:0;height:100%;font-family:system-ui,sans-serif}</style></head><body><script type="module">
+import { makePanelData } from './panel-fixture.mjs';
+import '../custom_components/reorder/www/reorder-panel.js';
+window.snapshot = makePanelData();
+window.reorderCalls = [];
+window.subscribers = new Set();
+const panel = document.createElement('reorder-panel');
+panel.panel = { config: { entry_id: 'fixture' } };
+panel.hass = {
+  language: 'en-US', config: { time_zone: 'America/New_York' },
+  connection: { subscribeEvents(callback) { window.subscribers.add(callback); return Promise.resolve(() => window.subscribers.delete(callback)); } },
+  async callWS(message) {
+    window.reorderCalls.push(message);
+    if (message.type === 'reorder/panel') return structuredClone(window.snapshot);
+    if (message.type === 'reorder/sandbox_submit') {
+      const batch = window.snapshot.batches.find(item => item.id === message.batch_id);
+      if (window.snapshot.mode !== 'Sandbox' || message.confirmation !== 'SANDBOX' || !batch?.can_submit_sandbox) throw { message: 'Sandbox confirmation required' };
+      Object.assign(batch, { status: 'pending', status_label: 'Pending', zinc_environment: 'sandbox', zinc_order_id: 'mock-submitted-id', can_submit_sandbox: false, can_cancel: false, can_refresh: true });
+      for (const order of batch.orders) order.shopping_list_status = 'pending';
+      return { id: batch.id, status: batch.status };
+    }
+    if (message.type === 'reorder/receive_items') {
+      const batch = window.snapshot.batches.find(item => item.id === message.batch_id);
+      if (message.confirmation !== 'SIMULATE RECEIPT' || message.order_ids.some(id => !batch.receivable_order_ids.includes(id))) throw { message: 'Receipt confirmation required' };
+      for (const order of batch.orders) if (message.order_ids.includes(order.id)) order.shopping_list_status = 'complete';
+      batch.receivable_order_ids = batch.receivable_order_ids.filter(id => !message.order_ids.includes(id));
+      return { results: message.order_ids.map(order_id => ({ order_id, status: 'completed' })), simulation: true };
+    }
+    if (message.type === 'reorder/product_save') {
+      const index = window.snapshot.catalog.findIndex(product => product.name === message.original_name);
+      if (!message.product.product_id.startsWith('https://')) throw { message: 'Zinc requires HTTPS' };
+      if (index < 0 && window.snapshot.catalog.some(product => product.name === message.product.name)) throw { message: 'Product already exists' };
+      const product = { ...structuredClone(message.product), can_rename: index < 0 || window.snapshot.catalog[index].can_rename };
+      if (index < 0) window.snapshot.catalog.push(product); else window.snapshot.catalog[index] = product;
+      window.snapshot.product_count = window.snapshot.catalog.filter(product => product.enabled).length;
+      return { saved: true };
+    }
+    if (message.type === 'reorder/product_remove') {
+      window.snapshot.catalog = window.snapshot.catalog.filter(product => product.name !== message.name);
+      window.snapshot.product_count = window.snapshot.catalog.filter(product => product.enabled).length;
+      return { removed: true };
+    }
+    if (message.type === 'reorder/live_submit') {
+      const batch = window.snapshot.batches.find(item => item.id === message.batch_id);
+      if (window.snapshot.mode !== 'Live enabled' || !batch?.can_submit_live || message.confirmation !== 'PLACE LIVE ORDER' || message.review_token !== batch.review_token) throw {message: 'Live review rejected'};
+      Object.assign(batch, {status: 'pending', status_label: 'Pending', zinc_environment: 'live', zinc_order_id: 'mock-live-id', can_submit_live: false, can_cancel: false, can_refresh: true});
+      delete batch.review_token;
+      return structuredClone(batch);
+    }
+    if (message.type === 'reorder/notifications_save') {
+      window.snapshot.preferences.notification_settings = structuredClone(message.settings);
+      return {saved: true};
+    }
+    if (message.type === 'reorder/notification_test') {
+      window.snapshot.notification_delivery = {event: 'test', sent: 2, failed: 0};
+      return {sent: 2, failed: 0};
+    }
+    if (message.type === 'reorder/preferences_save') {
+      window.snapshot.preferences = {...window.snapshot.preferences, ...structuredClone(message.preferences)};
+      return structuredClone(message.preferences);
+    }
+    if (window.failNextAction) { window.failNextAction = false; throw { message: 'Simulated network failure' }; }
+    const batch = window.snapshot.batches.find(item => item.id === message.service_data.batch_id);
+    if (message.service === 'cancel_batch') {
+      if (!batch?.can_cancel) throw { message: 'Cancellation is not allowed' };
+      Object.assign(batch, { status: 'canceled', status_label: 'Canceled', can_cancel: false, canceled_at: '2026-11-02T14:00:00Z' });
+    } else if (message.service === 'refresh_batch_zinc') {
+      if (!batch?.can_refresh) throw { message: 'Refresh is not allowed' };
+      Object.assign(batch, { last_refreshed_at: '2026-11-02T14:00:00Z', status: 'order_placed', status_label: 'Order placed' });
+      for (const order of batch.orders) {
+        order.provider_item = { id: 'provider-' + order.id, url: order.product_id, quantity: order.quantity, status: 'ordered', error_code: null };
+        order.shopping_list_status ||= 'pending';
+      }
+      batch.fulfillment = { items: batch.orders.map(order => order.provider_item), outcome: 'processing_or_success', prices_cents: { total: Math.round(batch.max_price * 90) }, shipments: [{ carrier: 'usps', tracking_number: 'TEST123', status: 'in_transit', url: 'https://www.17track.net/test', estimated_delivery_date: '2026-11-06' }] };
+      batch.receivable_order_ids = batch.orders.filter(order => order.shopping_list_status === 'pending').map(order => order.id);
+    } else if (message.service === 'prepare_batch') {
+      const newBatch = { id: 'prepared-in-app', status: 'ready', status_label: 'Ready for review', created_at: '2026-11-02T14:00:00Z', max_price: window.snapshot.queue.price_ceiling, can_cancel: true, can_refresh: false, can_submit_sandbox: true, receivable_order_ids: [], review_error: null, orders: structuredClone(window.snapshot.queue.orders) };
+      window.snapshot.batches.unshift(newBatch);
+      window.snapshot.queue = { count: 0, orders: [], price_ceiling: 0 };
+      return { response: newBatch };
+    } else throw { message: 'Unexpected service; fixture forbids purchasing' };
+    return { response: structuredClone(batch) };
+  },
+};
+document.body.append(panel);
+window.panel = panel;
+window.pushSnapshot = () => { for (const callback of window.subscribers) callback({}); };
+</script></body></html>

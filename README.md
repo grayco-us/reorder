@@ -2,6 +2,191 @@
 
 Home Assistant custom integration for routing exact, preapproved shopping-list items to a persistent order queue, with **Zinc API submission (sandbox first)**.
 
+## v0.11.0: Tracking and guided recovery
+
+**Batches → Needs attention** brings together uncertain submissions, tracking/list
+errors, failed/partial fulfillment, credential mismatches and ambiguous delivery links.
+Each batch separates delivered lines, failed/skipped lines and completed list entries;
+per-item results explain skipped or failed list updates. Refresh remains available with
+live purchasing off and needs no shipping details. It only reads the existing Zinc order;
+configured delivery-to-list completion can still run. Purchasing guards are unchanged.
+See [RECOVERY.md](RECOVERY.md) for safe next steps and dashboard-reconciliation limits.
+
+## v0.10.0: Reviewed live submission in the app
+
+Administrators with a live key and live purchasing enabled can select a ready batch,
+choose **Review live order**, acknowledge its saved contents and combined ceiling,
+and type **PLACE LIVE ORDER** before submitting once. Confirmation is bound to that
+batch and connection options; edits, account/address changes and integration reloads
+require fresh review. Existing native actions, duplicate protection, uncertainty locks
+and Sandbox/live safeguards remain. No notification or kiosk tap approves a purchase.
+See [LIVE_TESTING.md](LIVE_TESTING.md) before a user-run real order. All development
+checks use mocked transport and synthetic credentials; no live order was placed.
+
+## v0.9.0: Configurable cart and review notifications
+
+**Reorder → Settings → Notifications** controls cart additions, prepared-batch review
+reminders, status changes, confirmed delivery, cart edits and attention alerts. Choose
+Home Assistant notifications, loaded phone/notify destinations, or Kiosk Satellite's
+built-in ESPHome notification cards. Set kiosk duration, text scale and chime; save and
+use the test button. No reminder or notification tap purchases or approves anything.
+See [NOTIFICATIONS.md](NOTIFICATIONS.md) for voice-to-cart behavior, recipients and setup.
+
+## v0.8.1: First live-trial guidance
+
+Mode-specific helper text, state definitions and action/field descriptions now explain
+what submits a purchase, which IDs to use, how the combined ceiling works, and when
+Shopping List completion happens. Native approve/cancel labels describe local work
+rather than calling it simulated. Purchasing behavior and safeguards are unchanged.
+Follow [the first live-trial guide](LIVE_TESTING.md) for one user-run order, status and
+delivery checks, and recovery if submission is uncertain. The sidebar still submits
+Sandbox batches only; live submission requires the existing separately confirmed action.
+
+## v0.8.0: Delivery completes the Shopping List
+
+Tracked batches now refresh automatically every 15 minutes (GET only, at most ten
+batches per pass). A uniquely matched provider-delivered line checks off its original
+Shopping List ID. Completed entries leave the active list and remain in completed
+history. Order placement, shipped packages, failed items, ambiguous matches, renamed
+entries and replacement IDs never trigger completion. Sandbox delivery is simulated.
+
+**Reorder → Settings → Automatically check off linked list items after confirmed
+delivery** is enabled by default; disable it for manual receipt. A list failure never
+hides saved delivery, is shown inline, and retries on refresh. Completed markers survive
+restarts; unchecking an already synchronized entry is respected. Fresh requests still
+obey cooldown. The same 15-minute pass reconciles missed source additions, edits and
+removals, including requests previously blocked by an active order/cooldown. It never
+submits or retries purchases. See [the ordering guide](ORDERING.md).
+
+## v0.7.0: Sandbox submission, tracking and explicit list receipt
+
+Ready sandbox batches can now be submitted from the sidebar after typing **SANDBOX**.
+The server independently requires a `zn_test_` key; live purchase controls are not
+exposed. Refresh retains safe per-item outcomes, partial failures, tracking and reported
+costs. Placement and delivery remain distinct; v0.8.0 adds completion only after confirmed item delivery.
+
+Use **Complete test list items**, select successful linked lines, and type **SIMULATE
+RECEIPT** to exercise list completion without claiming provider delivery. Failed/skipped,
+renamed, missing or ambiguous lines stay untouched. Existing live-order list maintenance
+requires explicit per-item delivery and its own confirmation. Confirmed receipt/delivery
+permits future requests only after the configured cooldown, without resubmitting an old
+order. See the [full order-stage test guide](ORDERING.md).
+
+## v0.6.0: Shopping List synchronization and in-app setup
+
+Reorder now handles renames, completion/unchecking, removal, and bulk list changes.
+Unsubmitted affected lines are canceled; prepared batches become **Needs fresh review**
+and return their other lines to the queue. Submitted/uncertain work is never altered
+by a list edit. Source state is rechecked before submission to close edit/submit races.
+See the [flow table and compatibility notes](FLOWS.md).
+
+The sidebar **Products** page adds product setup, editing, enable/disable and confirmed
+removal. **Settings** manages batching schedules and list synchronization. Validation
+and rollback are shared with the legacy interfaces, and native product/schedule forms
+now preserve saved Zinc connection options. Keys, delivery and live setup remain in
+Home Assistant's native configuration, linked from the app. Existing storage and
+purchasing safeguards remain compatible; no purchases are submitted by the app.
+
+## v0.5.1: Explain Shopping List intake
+
+The sidebar Queue tab now shows the most recent Shopping List matching outcomes:
+queued, unmatched, disabled, ambiguous, already processed, blocked by an existing
+order, cooldown, or save failure. It also shows configured product names/aliases and
+whether the built-in Shopping List integration is loaded. Activity is limited to the
+latest 20 received additions in memory and clears when Reorder restarts.
+
+A never-submitted local cancellation no longer starts a purchase cooldown: adding a
+fresh Shopping List item can queue that product again. The canceled order itself
+remains canceled. Seen-item deduplication, active/uncertain-order guards, real
+submission cooldowns, and all purchasing confirmations are unchanged. Failed queue
+saves restore the order/seen-item state rather than leaving a phantom queued order.
+
+## v0.5.0: Reorder in the Home Assistant sidebar
+
+Reorder now includes a bundled sidebar app: batch lists and inline product review,
+queue preparation, provider-status refresh, and confirmed local cancellation. No
+manual dashboard YAML, custom card installation, or frontend build is required.
+It adapts to desktop and mobile, uses Home Assistant themes and local time, and keeps
+batch selection local to each browser. There is no purchase control in the app.
+
+Deploy the update, restart Home Assistant, refresh your browser, and open **Reorder**
+in the sidebar as an administrator. Existing configuration, stored orders, entities,
+and actions are retained. The old dashboard is optional and is not removed or
+modified automatically. See the [sidebar app guide](SIDEBAR.md) for access, testing,
+upgrade details and current limitations.
+
+## v0.4.5: Review batch contents inline
+
+Selecting a batch now displays its saved products, clickable product links,
+quantities, individual price ceilings, and total ceiling directly on the dashboard.
+No Review button or notification is required. A two-section layout keeps the batch
+selector, details, and controls together, with the queue and history alongside them.
+Statuses have readable display labels; timestamps use Home Assistant's local timezone.
+
+Update the integration and re-import [the dashboard YAML](dashboards/reorder.yaml)
+to use the new layout. Existing dashboards are not automatically overwritten. Raw
+provider status values, entity IDs, and stored batches remain unchanged. The existing
+review action and button continue to work for callers using notification-based review.
+
+## v0.4.4: Native Reorder dashboard
+
+A [starter dashboard](dashboards/reorder.yaml) now shows ready and submitted/past
+batches, purchasing mode, and native batch selection with review, refresh, and local
+cancellation controls. It uses Home Assistant's built-in cards only and contains no
+purchase button. Selection clears after restart; unavailable operations remain guarded.
+The mode sensor never exposes keys or delivery details. Existing sensor IDs, stored
+batches, and configuration are preserved.
+
+Follow the [dashboard installation guide](DASHBOARD.md) to create a separate dashboard
+and import the YAML after updating the integration. Dashboard creation is explicit;
+upgrading Reorder does not overwrite your existing dashboards.
+
+## v0.4.3: Review and cancel prepared batches
+
+Use `reorder.review_batch` with a batch ID to display its saved product names, URLs,
+quantities, individual price ceilings, total ceiling, and current local status. It
+never contacts Zinc. Catalog edits do not change the queued product snapshots being
+reviewed. The action also supports an optional response for scripts.
+
+`reorder.cancel_batch` cancels a locally prepared `ready` batch **and its queued
+orders**. Canceled orders stay in history, are not returned to the queue, and cannot
+be purchased or automatically batched again. Repeating the cancellation is safe.
+This does not cancel a retailer purchase: any submitted or uncertain batch must be
+reconciled with Zinc. Cancellation is saved before notification, with in-memory
+rollback on storage failure. Configuration and existing storage remain compatible.
+
+## v0.4.2: Visible submission and refresh results
+
+`reorder.submit_batch_zinc` and `reorder.refresh_batch_zinc` now show the batch ID,
+Zinc status, and sandbox/live mode in a persistent notification. Refresh updates the
+same notification instead of adding one on every call. Both actions support optional
+responses for scripts; existing callers still work without requesting a response.
+Saved batches include `last_refreshed_at` after a successful refresh. Notification
+failures cannot turn a successful save into a failed action.
+
+Zinc v2 `pending` orders block duplicate purchases for the same product. Invalid
+refresh responses leave the previously saved status intact. Failed batches remain
+locked against resubmission; reconcile with Zinc instead of submitting again.
+Configuration, entity IDs, and the existing storage version/key are unchanged.
+
+## v0.4.1: Reliable batch actions
+
+Batch preview and preparation use Home Assistant's supported persistent notification API.
+Preparing a batch saves its ID and product assignments before displaying a notification.
+Notification failures are logged and do not report a failed preparation: check the
+**Prepared batches** sensor attributes or request the action response for the batch ID.
+Preview and preparation never submit purchases. See [batching and regression tests](BATCHING.md).
+
+Repeated or simultaneous preparation cannot assign the same queued order to multiple
+batches. If no unbatched eligible orders remain, the action reports `No eligible queued
+Zinc orders`. With additional eligible orders, a later call may prepare a separate,
+disjoint batch. Existing configurations and `reorder.catalog_v1` storage remain compatible.
+
+Submission is persisted before Zinc I/O. Attempted submissions cannot be reopened by
+provider status changes, and unknown outcomes require manual reconciliation with Zinc.
+Sandbox/live key checks, live opt-in, and exact confirmation phrases remain required.
+No real orders or payment credentials are used in automated tests.
+
 ## v0.3.1: Default quantity and ranked substitutions
 
 - Product catalog already supports `quantity` (1–20). Shopping-list `coffee` triggers the configured quantity, e.g. two bags, rather than quantity one.
@@ -26,7 +211,7 @@ Home Assistant custom integration for routing exact, preapproved shopping-list i
 
 A real order can charge your funded Zinc wallet, including shipping/tax, within the configured total-order ceiling. `max_price` is a **total order cap in USD**, including tax and shipping, not a unit price. Address and API key are stored in Home Assistant's config-entry options. Protect your HA instance, backups, and diagnostics; never commit secrets to Git.
 
-No verified sandbox transaction or Home Assistant runtime integration test has been performed for this release. Test carefully before enabling live mode. Order status is retrieved manually (webhooks and automated polling are planned). No automated shopping-list removal or queue retry is performed.
+The sandbox success path has been manually exercised in a development Home Assistant instance. Automated regression tests use mocked Zinc transport; live purchasing and the full range of sandbox failures remain unverified. Test carefully before enabling live mode. Batch status is checked every 15 minutes or through Refresh. Confirmed delivered batch lines can complete their linked list entries; purchases are never retried automatically. Legacy standalone order status remains manually refreshed.
 
 ## Install
 
@@ -91,7 +276,7 @@ Create a GitHub Release from that tag and mark it **Pre-release**. To install fr
 ## Next milestones
 
 - Automatable Zinc submission behind per-product purchasing enablement and whole-house monthly caps.
-- Webhook verification and status tracking including delivery.
+- Webhook verification and push status updates.
 - More descriptive statuses, confirmation via dashboard, easier product lookup, secrets/password selector improvements.
 - Kroger cart provider.
 
@@ -120,3 +305,9 @@ git push origin main
 ```
 
 Do not push a release tag until you've tested against Home Assistant and Zinc sandbox.
+
+## v0.4.0 — Batch queue (development)
+
+See [BATCHING.md](BATCHING.md) for the complete Gitea workflow, deployment and sandbox test instructions. Batches are review-first: schedules **never** submit transactions automatically. Prepared batches contain up to 10 distinct Zinc catalog items; quantities are retained and the sum of per-product price ceilings becomes the overall batch ceiling. `reorder.preview_batch`, `reorder.prepare_batch`, `reorder.submit_batch_zinc` and `reorder.refresh_batch_zinc` are available in Developer Tools → Actions.
+
+Do not enable live Zinc transactions until a sandbox order has successfully exercised the multi-line request and the provider's response handling has been checked. Partial fulfillment and per-product substitution inside a batch are not automated in this release.

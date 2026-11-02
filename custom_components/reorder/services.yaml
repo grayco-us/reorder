@@ -1,97 +1,187 @@
 set_product:
   name: Add or update approved product
-  description: Register an approved product. Shopping-list adds only queue orders.
+  description: Register an approved product with validated unique matching names/aliases. Changes apply to future
+    matches; saved order snapshots remain unchanged. Shopping-list adds only queue orders.
   fields:
     name:
       required: true
       selector:
-        text:
+        text: null
+      name: Product name
+      description: Exact Shopping List name to match; case and extra spaces are ignored.
     aliases:
       selector:
-        object:
+        object: null
+      name: Matching aliases
+      description: Additional exact names; these do not change the ordered quantity.
     retailer:
       required: true
       selector:
         select:
           options:
-            - zinc
-            - kroger
-            - other
+          - zinc
+          - kroger
+          - other
     product_id:
       required: true
       selector:
-        text:
+        text: null
+      name: Product URL or identifier
+      description: Zinc requires the complete HTTPS retailer product URL. Check the variant and pack size.
     substitutes:
       description: Up to two ranked HTTPS fallback product URLs. Zinc only.
       selector:
-        object:
+        object: null
     quantity:
       selector:
         number:
           min: 1
           max: 20
+      name: Retailer units
+      description: Fixed units per matching list entry; Shopping List text is not parsed for quantity.
     max_price:
       selector:
         number:
-          min: 1
+          min: 0.01
           max: 10000
           step: 0.01
+      name: Product ceiling contribution (USD)
+      description: Allowance for configured units plus tax and shipping. Batch contributions are summed into one
+        order cap, not enforced separately per line.
     cooldown_hours:
       selector:
         number:
           min: 1
           max: 8760
+      name: Repeat-request cooldown (hours)
+      description: Pending/uncertain purchases block repeats. Confirmed delivery or recorded receipt anchors the
+        cooldown; 168 hours = 7 days.
     enabled:
       selector:
-        boolean:
+        boolean: null
 remove_product:
   name: Remove approved product
   fields:
     name:
       required: true
       selector:
-        text:
+        text: null
 approve_order:
-  name: Approve simulated order
-  description: Marks a test order approved; does not place an order.
+  name: Approve local queued order
+  description: Marks an unbatched queued line approved locally. Approval never submits a Sandbox or live purchase.
   fields:
     order_id:
       required: true
       selector:
-        text:
+        text: null
 cancel_order:
-  name: Cancel simulated order
+  name: Cancel local queued order
+  description: Cancels an unbatched queued line locally. Cannot cancel a submitted retailer order. For prepared
+    lines, manage the batch instead.
   fields:
     order_id:
       required: true
       selector:
-        text:
+        text: null
 submit_zinc:
   name: Submit Zinc order
-  description: Sends a queued Zinc order to the API. Requires SANDBOX for test keys or PLACE LIVE ORDER for live keys. This action can spend real money if live is enabled.
+  description: Sends a queued Zinc order to the API. Requires SANDBOX for test keys or PLACE LIVE ORDER for live
+    keys. This action can spend real money if live is enabled.
   fields:
     order_id:
       required: true
       selector:
-        text:
+        text: null
+      description: Local unbatched Reorder order ID, not a saved batch ID or Zinc order ID. Use submit_batch_zinc
+        for prepared batches.
     confirmation:
       required: true
       selector:
-        text:
+        text: null
+      description: 'Exact phrase: SANDBOX for a test key; PLACE LIVE ORDER for a live key with live purchasing enabled.'
 refresh_zinc:
   name: Refresh Zinc order
-  description: Fetch the latest order status from Zinc (on demand, no polling).
+  description: Fetches status for a legacy standalone order. Does not submit or cancel a purchase. Standalone orders
+    are not included in automatic batch tracking or delivery-to-list completion. Requires a valid matching-environment
+    key, not live purchasing enablement or shipping details.
   fields:
     order_id:
       required: true
       selector:
-        text:
-
+        text: null
 queue_next_substitution:
   name: Queue next approved substitution
-  description: Only works after a Zinc order is confirmed out_of_stock. Creates a new queued order, never automatically buys.
+  description: Only works after a Zinc order is confirmed out_of_stock. Creates a new queued order, never automatically
+    buys.
   fields:
     order_id:
       required: true
       selector:
-        text:
+        text: null
+preview_batch:
+  name: Preview Zinc batch
+  description: Previews eligible products and spending ceiling without purchases. Supports an optional preview response.
+prepare_batch:
+  name: Prepare Zinc batch
+  description: Saves up to 10 unbatched product lines for review. Returns the saved batch when a response is requested;
+    also available in Prepared batches sensor attributes. Notification failure does not undo creation.
+  fields:
+    max_items:
+      selector:
+        number:
+          min: 1
+          max: 10
+          mode: box
+submit_batch_zinc:
+  name: Submit Zinc batch
+  description: Submits a ready saved batch once using the current credentials and its combined USD ceiling, including
+    tax and shipping. Requires SANDBOX for a test key, or a live key plus enabled live purchasing and PLACE LIVE
+    ORDER. Live submission can spend real money. An uncertain attempt must be reconciled in Zinc, not submitted
+    as a new batch.
+  fields:
+    batch_id:
+      required: true
+      selector:
+        text: null
+      name: Saved batch ID
+      description: Local Reorder batch ID shown in Batches, not the Zinc order ID.
+    confirmation:
+      required: true
+      description: SANDBOX for test credentials or PLACE LIVE ORDER for live credentials.
+      selector:
+        text: null
+refresh_batch_zinc:
+  name: Refresh Zinc batch status
+  description: Retrieves status without making a purchase. May check off original Shopping List IDs after confirmed
+    item delivery when automatic completion is enabled. Placement alone never completes the list. Tracking also
+    runs every 15 minutes for unresolved batches; supports an optional saved response. Requires a valid matching-environment
+    key, not live purchasing enablement or shipping details.
+  fields:
+    batch_id:
+      required: true
+      selector:
+        text: null
+      name: Saved batch ID
+      description: Local Reorder batch ID shown in Batches, not the Zinc order ID.
+review_batch:
+  name: Review saved batch
+  description: Shows the batch's saved product URLs, quantities, status, and price ceilings without contacting Zinc.
+    Supports an optional response.
+  fields:
+    batch_id:
+      required: true
+      selector:
+        text: null
+      name: Saved batch ID
+      description: Local Reorder batch ID shown in Batches, not the Zinc order ID.
+cancel_batch:
+  name: Cancel unsubmitted batch
+  description: Cancels a ready local batch and all its queued orders. Does not cancel retailer purchases or return
+    orders to the queue. Attempted submissions cannot be canceled here. Supports an optional response.
+  fields:
+    batch_id:
+      required: true
+      selector:
+        text: null
+      name: Saved batch ID
+      description: Local Reorder batch ID shown in Batches, not the Zinc order ID.
