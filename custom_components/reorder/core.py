@@ -34,6 +34,7 @@ class ReorderEngine:
     def __init__(self, hass, store):
         self.hass, self.store = hass, store
         self.lock = asyncio.Lock()
+        self.selected_batch_id = None
 
     def publish(self):
         self.hass.bus.async_fire(EVENT_UPDATED)

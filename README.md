@@ -2,6 +2,19 @@
 
 Home Assistant custom integration for routing exact, preapproved shopping-list items to a persistent order queue, with **Zinc API submission (sandbox first)**.
 
+## v0.4.4: Native Reorder dashboard
+
+A [starter dashboard](dashboards/reorder.yaml) now shows ready and submitted/past
+batches, purchasing mode, and native batch selection with review, refresh, and local
+cancellation controls. It uses Home Assistant's built-in cards only and contains no
+purchase button. Selection clears after restart; unavailable operations remain guarded.
+The mode sensor never exposes keys or delivery details. Existing sensor IDs, stored
+batches, and configuration are preserved.
+
+Follow the [dashboard installation guide](DASHBOARD.md) to create a separate dashboard
+and import the YAML after updating the integration. Dashboard creation is explicit;
+upgrading Reorder does not overwrite your existing dashboards.
+
 ## v0.4.3: Review and cancel prepared batches
 
 Use `reorder.review_batch` with a batch ID to display its saved product names, URLs,

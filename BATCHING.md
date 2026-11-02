@@ -1,4 +1,4 @@
-# Reorder v0.4.3 — Batch testing
+# Reorder v0.4.4 — Batch testing
 
 **Development preview. No scheduled payments.** A weekly/rolling schedule only creates a persistent batch marked `ready`.
 
@@ -160,3 +160,11 @@ Once a submission has started, including `submission_unknown`, local cancellatio
 is rejected. A provider status change cannot reopen local cancellation. Reconcile
 those orders with Zinc; this action never sends a cancellation request to a retailer.
 No live transactions are required to test these actions.
+
+## Native dashboard (v0.4.4)
+
+The [Reorder dashboard guide](DASHBOARD.md) explains how to import the built-in-card
+layout. It lists saved batches and their mode/status, and provides a batch selector
+with review, refresh, and local cancellation buttons. No submission or purchasing
+control is included. Selected batch state is transient and resets after restart or
+integration reload; batch records remain unchanged.

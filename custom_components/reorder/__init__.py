@@ -33,6 +33,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     engine = ReorderEngine(hass, store)
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = engine
 
+    async def options_updated(_hass, _entry):
+        engine.publish()
+
+    entry.async_on_unload(entry.add_update_listener(options_updated))
+
     @callback
     def handle_shopping_event(event):
         data = event.data
@@ -249,11 +254,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                                  schema=vol.Schema({vol.Required("order_id"): cv.string}))
     hass.services.async_register(DOMAIN, "cancel_order", cancel_order,
                                  schema=vol.Schema({vol.Required("order_id"): cv.string}))
-    await hass.config_entries.async_forward_entry_setups(entry, ["sensor"])
+    await hass.config_entries.async_forward_entry_setups(entry, ["sensor", "select", "button"])
     return True
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    if not await hass.config_entries.async_unload_platforms(entry, ["sensor"]):
+    if not await hass.config_entries.async_unload_platforms(entry, ["sensor", "select", "button"]):
         return False
     for service in ("set_product", "remove_product", "approve_order", "cancel_order", "submit_zinc", "refresh_zinc", "queue_next_substitution", "preview_batch", "prepare_batch", "submit_batch_zinc", "refresh_batch_zinc", "review_batch", "cancel_batch"):
         hass.services.async_remove(DOMAIN, service)

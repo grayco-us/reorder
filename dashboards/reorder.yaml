@@ -1,0 +1,103 @@
+title: Reorder
+views:
+  - title: Reorder
+    path: reorder
+    icon: mdi:cart-outline
+    cards:
+      - type: markdown
+        title: Reorder
+        content: >-
+          **Purchasing mode: {{ states('sensor.reorder_purchasing_mode') }}**
+
+          This dashboard does not submit purchases. Select a batch below to review
+          its saved products, refresh its Zinc status, or cancel unsubmitted work.
+      - type: entities
+        title: Overview
+        show_header_toggle: false
+        entities:
+          - entity: sensor.reorder_purchasing_mode
+            name: Purchasing mode
+          - entity: sensor.prepared_batches
+            name: Ready for review
+          - entity: sensor.queued_orders
+            name: Queued product lines
+          - entity: sensor.approved_products
+            name: Enabled catalog products
+      - type: horizontal-stack
+        cards:
+          - type: button
+            name: Preview queue
+            icon: mdi:clipboard-list-outline
+            tap_action:
+              action: perform-action
+              perform_action: reorder.preview_batch
+          - type: button
+            name: Prepare batch
+            icon: mdi:package-variant-closed-plus
+            tap_action:
+              action: perform-action
+              perform_action: reorder.prepare_batch
+              data:
+                max_items: 10
+      - type: markdown
+        title: Ready for review
+        content: |-
+          {% set batches = state_attr('sensor.prepared_batches', 'batches') or [] %}
+          {% set ready = batches | selectattr('status', 'eq', 'ready') | list %}
+          {% for batch in ready | reverse %}
+          - **{{ batch.id }}** — {{ batch.order_ids | count }} product line(s), ceiling **${{ '%.2f' | format(batch.max_price) }}**
+          {% else %}
+          No prepared batches waiting for review.
+          {% endfor %}
+      - type: markdown
+        title: Submitted and past batches
+        content: |-
+          {% set batches = state_attr('sensor.prepared_batches', 'batches') or [] %}
+          {% for batch in batches | rejectattr('status', 'eq', 'ready') | reverse %}
+          - **{{ batch.id }}** — **{{ batch.status }}** · {{ batch.zinc_environment | default('local') }}
+            {% if batch.last_refreshed_at is defined %}Last refreshed: {{ batch.last_refreshed_at }}{% endif %}
+          {% else %}
+          No submitted or canceled batches yet.
+          {% endfor %}
+
+          Lists show the most recent 25 saved batches. The selector includes all saved batches.
+      - type: entities
+        title: Choose a batch
+        show_header_toggle: false
+        entities:
+          - entity: select.reorder_batch
+            name: Batch and saved status
+      - type: horizontal-stack
+        cards:
+          - type: button
+            entity: button.reorder_review_batch
+            name: Review
+            tap_action:
+              action: perform-action
+              perform_action: button.press
+              target:
+                entity_id: button.reorder_review_batch
+          - type: button
+            entity: button.reorder_refresh_batch
+            name: Refresh
+            tap_action:
+              action: perform-action
+              perform_action: button.press
+              target:
+                entity_id: button.reorder_refresh_batch
+          - type: button
+            entity: button.reorder_cancel_batch
+            name: Cancel locally
+            tap_action:
+              action: perform-action
+              perform_action: button.press
+              target:
+                entity_id: button.reorder_cancel_batch
+              confirmation:
+                text: Cancel this unsubmitted batch AND its queued orders? They remain in history and will not be queued again automatically. This does not cancel retailer purchases.
+      - type: markdown
+        content: >-
+          **Review** shows product details in a persistent notification. **Refresh**
+          only retrieves Zinc status. **Cancel locally** is available only before
+          submission. Unavailable controls are intentionally disabled. Selection
+          clears after a restart or integration reload; choose the batch again.

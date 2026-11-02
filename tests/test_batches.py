@@ -541,6 +541,114 @@ class BatchActionsTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.engine.store.data, before)
         self.transport.assert_not_awaited()
 
+    async def select_batch(self, batch):
+        await self.hass.async_block_till_done()
+        select = self.hass.states.get("select.reorder_batch")
+        option = next(label for label in select.attributes["options"] if label.startswith(batch["id"] + " — "))
+        await self.hass.services.async_call("select", "select_option", {
+            "entity_id": "select.reorder_batch", "option": option,
+        }, blocking=True)
+        await self.hass.async_block_till_done()
+
+    async def press_batch_button(self, kind):
+        await self.hass.services.async_call("button", "press", {
+            "entity_id": f"button.reorder_{kind}_batch",
+        }, blocking=True)
+        await self.hass.async_block_till_done()
+
+    async def test_dashboard_controls_require_an_explicit_batch_selection(self):
+        await self.prepare()
+        await self.hass.async_block_till_done()
+        self.assertEqual(self.hass.states.get("select.reorder_batch").state, "unknown")
+        for kind in ("review", "refresh", "cancel"):
+            self.assertEqual(self.hass.states.get(f"button.reorder_{kind}_batch").state, "unavailable")
+        self.transport.assert_not_awaited()
+
+    async def test_dashboard_review_and_local_cancel_follow_selection(self):
+        batch = await self.prepare()
+        await self.select_batch(batch)
+        self.assertNotEqual(self.hass.states.get("button.reorder_review_batch").state, "unavailable")
+        self.assertNotEqual(self.hass.states.get("button.reorder_cancel_batch").state, "unavailable")
+        self.assertEqual(self.hass.states.get("button.reorder_refresh_batch").state, "unavailable")
+        await self.press_batch_button("review")
+        self.assertEqual(self.hass.data["persistent_notification"][f"reorder_batch_{batch['id']}"]["title"], "Reorder — Batch Review")
+        await self.press_batch_button("cancel")
+        self.assertEqual(self.engine.store.data["batches"][batch["id"]]["status"], "canceled")
+        self.assertEqual(self.hass.states.get("button.reorder_cancel_batch").state, "unavailable")
+        self.assertEqual(self.hass.states.get("select.reorder_batch").state, batch["id"] + " — canceled")
+        self.transport.assert_not_awaited()
+
+    async def test_dashboard_refresh_never_submits_and_updates_selected_label(self):
+        batch = await self.prepare()
+        await self.submit(batch)
+        await self.select_batch(batch)
+        self.assertEqual(self.hass.states.get("button.reorder_cancel_batch").state, "unavailable")
+        self.transport.reset_mock()
+        self.transport.return_value = {"id": "mock-zinc-id", "status": "order_placed"}
+        await self.press_batch_button("refresh")
+        self.transport.assert_awaited_once_with("GET", "/orders/mock-zinc-id")
+        self.assertEqual(self.hass.states.get("select.reorder_batch").state, batch["id"] + " — order_placed")
+
+    async def test_dashboard_mode_changes_without_exposing_credentials(self):
+        await self.hass.async_block_till_done()
+        self.assertEqual(self.hass.states.get("sensor.reorder_purchasing_mode").state, "Sandbox")
+        for options, expected in (
+            ({}, "Not configured"),
+            ({"zinc_api_key": "not-a-key"}, "Invalid key"),
+            ({"zinc_api_key": "zn_live_not-a-real-key"}, "Live disabled"),
+            ({"zinc_api_key": "zn_live_not-a-real-key", "zinc_live_enabled": True}, "Live enabled"),
+        ):
+            self.hass.config_entries.async_update_entry(self.entry, options=options)
+            await self.hass.async_block_till_done()
+            state = self.hass.states.get("sensor.reorder_purchasing_mode")
+            self.assertEqual(state.state, expected)
+            self.assertNotIn("zinc_api_key", state.attributes)
+            self.assertNotIn("not-a-real-key", str(state.attributes))
+        self.transport.assert_not_awaited()
+
+    async def test_dashboard_selection_clears_on_reload_without_changing_batches(self):
+        batch = await self.prepare()
+        await self.select_batch(batch)
+        before = deepcopy(self.engine.store.data)
+        self.assertTrue(await self.hass.config_entries.async_unload(self.entry.entry_id))
+        self.assertTrue(await self.hass.config_entries.async_setup(self.entry.entry_id))
+        await self.hass.async_block_till_done()
+        self.assertIsNone(self.hass.data["reorder"][self.entry.entry_id].selected_batch_id)
+        self.assertEqual(self.hass.states.get("select.reorder_batch").state, "unknown")
+        self.assertEqual(self.hass.data["reorder"][self.entry.entry_id].store.data, before)
+        self.assertEqual(self.hass.states.get("button.reorder_cancel_batch").state, "unavailable")
+
+    async def test_dashboard_refresh_disables_for_a_different_key_environment(self):
+        batch = await self.prepare()
+        await self.submit(batch)
+        await self.select_batch(batch)
+        self.hass.config_entries.async_update_entry(self.entry, options=self.options | {
+            "zinc_api_key": "zn_live_not-a-real-key", "zinc_live_enabled": True,
+        })
+        await self.hass.async_block_till_done()
+        self.assertEqual(self.hass.states.get("button.reorder_refresh_batch").state, "unavailable")
+        self.transport.assert_awaited_once()
+
+    async def test_dashboard_templates_render_empty_and_populated_batch_lists(self):
+        import yaml
+        from homeassistant.helpers.template import Template
+        dashboard = yaml.safe_load((Path(__file__).resolve().parents[1] / "dashboards/reorder.yaml").read_text())
+        cards = [card for card in dashboard["views"][0]["cards"] if card["type"] == "markdown"]
+        await self.hass.async_block_till_done()
+        empty = "\n".join(str(Template(card["content"], self.hass).async_render()) for card in cards)
+        self.assertIn("No prepared batches", empty)
+        self.assertIn("Sandbox", empty)
+        batch = await self.prepare()
+        await self.hass.async_block_till_done()
+        populated = "\n".join(str(Template(card["content"], self.hass).async_render()) for card in cards)
+        self.assertIn(batch["id"], populated)
+        self.assertIn("$12.50", populated)
+        await self.submit(batch)
+        await self.hass.async_block_till_done()
+        submitted = "\n".join(str(Template(card["content"], self.hass).async_render()) for card in cards)
+        self.assertIn("submitted", submitted)
+        self.assertIn("sandbox", submitted)
+
     async def test_missing_shipping_address_blocks_submission(self):
         batch = await self.prepare()
         self.hass.config_entries.async_update_entry(self.entry, options={"zinc_api_key": "zn_test_not-a-real-key"})
@@ -582,3 +690,27 @@ class ZincPayloadTest(unittest.IsolatedAsyncioTestCase):
                 with self.assertRaises(ValueError):
                     await client.create_batch_order({"id": "stable", "max_price": 12.5}, orders, {})
         client.request.assert_not_awaited()
+
+
+class DashboardConfigTest(unittest.TestCase):
+    def test_dashboard_uses_native_cards_and_never_submits_purchases(self):
+        import yaml
+        config = yaml.safe_load((Path(__file__).resolve().parents[1] / "dashboards/reorder.yaml").read_text())
+        actions = []
+        allowed_cards = {"markdown", "entities", "button", "horizontal-stack"}
+        def inspect(node):
+            if isinstance(node, dict):
+                if "type" in node:
+                    self.assertIn(node["type"], allowed_cards)
+                if "perform_action" in node:
+                    actions.append(node)
+                    self.assertIn(node["perform_action"], {"button.press", "reorder.preview_batch", "reorder.prepare_batch"})
+                for value in node.values():
+                    inspect(value)
+            elif isinstance(node, list):
+                for value in node:
+                    inspect(value)
+        inspect(config)
+        cancel = next(action for action in actions if action.get("target", {}).get("entity_id") == "button.reorder_cancel_batch")
+        self.assertIn("confirmation", cancel)
+        self.assertIn("queued orders", cancel["confirmation"]["text"])
