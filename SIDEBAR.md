@@ -82,6 +82,9 @@ entities and actions working. A conflicting `/reorder-app` panel is not overwrit
 
 Backend and service regression tests (Python 3.13):
 
+Create the isolated environment and install both pinned dependencies as described in
+[TESTING.md](TESTING.md) before running these commands.
+
 ```bash
 .venv/bin/python -m unittest discover -s tests -p 'test_*.py' -v
 ```
