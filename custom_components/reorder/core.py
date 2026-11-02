@@ -10,8 +10,8 @@ from homeassistant.util import dt as dt_util
 from .fulfillment import fulfillment_snapshot, mapped_item, receipt_eligible, safe_code, item_delivery_confirmed
 from .batch import review_batch
 from .shopping import shopping_items, shopping_entity_for_item
-from .notifications import async_notify
-from .product_config import PREFERENCES_SCHEMA, product_values
+from .notifications import emit
+from .product_config import PREFERENCES_SCHEMA, NOTIFICATION_SCHEMA, product_values
 from .const import ACTIVE_PURCHASE_STATUSES, EVENT_UPDATED
 
 _LOGGER = logging.getLogger(__name__)
@@ -44,6 +44,7 @@ class ReorderEngine:
         self._refresh_cursor = 0
         self.selected_batch_id = None
         self.intake_events = []
+        self.notification_delivery = None
 
     def publish(self):
         self.hass.bus.async_fire(EVENT_UPDATED)
@@ -105,6 +106,10 @@ class ReorderEngine:
         settings = PREFERENCES_SCHEMA(values)
         sync = settings.pop("sync_shopping_list")
         automatic = settings.pop("auto_complete_delivered", None)
+        notifications = settings.pop("notification_settings", None)
+        if notifications is not None:
+            for key in ("events", "notify_services", "notify_entities", "kiosk_services"):
+                notifications[key] = list(dict.fromkeys(notifications[key]))
         async with self.lock:
             previous = deepcopy(self.store.data.get("batch_settings", {}))
             previous_preferences = deepcopy(self.store.data.get("preferences", {}))
@@ -112,6 +117,8 @@ class ReorderEngine:
             self.store.data["batch_settings"] = {**previous, **settings,
                 "last_scheduled_date": None if changed else previous.get("last_scheduled_date")}
             self.store.data["preferences"] = {**previous_preferences, "sync_shopping_list": sync}
+            if notifications is not None:
+                self.store.data["preferences"]["notification_settings"] = notifications
             if automatic is not None:
                 self.store.data["preferences"]["auto_complete_delivered"] = automatic
             try:
@@ -122,6 +129,20 @@ class ReorderEngine:
                 raise
         self.publish()
         return {**self.store.data["batch_settings"], "sync_shopping_list": sync}
+
+    async def update_notifications(self, values):
+        settings = NOTIFICATION_SCHEMA(values)
+        for key in ("events", "notify_services", "notify_entities", "kiosk_services"):
+            settings[key] = list(dict.fromkeys(settings[key]))
+        async with self.lock:
+            previous = deepcopy(self.store.data.get("preferences", {}))
+            self.store.data.setdefault("preferences", {})["notification_settings"] = settings
+            try:
+                await self.store.save()
+            except Exception:
+                self.store.data["preferences"] = previous
+                raise
+        self.publish()
 
     def _record_intake(self, item, reason, message, order_id=None):
         """Bounded, per-run diagnostics; never store entire Shopping List payloads."""
@@ -236,6 +257,7 @@ class ReorderEngine:
             if batches:
                 message += " Its prepared batch was invalidated; other lines returned to the queue for fresh review."
             self._record_intake(item, "list_change", message)
+            emit(self, "list_change", message + " No retailer purchase was canceled.")
             return True
 
     async def _handle_item_change(self, action, item):
@@ -381,11 +403,13 @@ class ReorderEngine:
         if product["retailer"] != "zinc":
             message += f" This product uses {product['retailer']} and is not eligible for Zinc batches."
         result = self._record_intake(item, "queued", message, order_id)
-        async_notify(
-            self.hass,
-            f"{product['name']} matched your auto-reorder catalog. "
-            f"Queued as {order_id}; no purchase was made.",
-            title="Reorder — test order", notification_id=f"reorder_{order_id}")
+        strategy = self.store.data.get("batch_settings", {}).get("strategy", "manual")
+        next_step = ("Review your cart and prepare a batch when ready."
+                     if strategy == "manual" else "Your schedule will prepare a batch for review; it never places orders.")
+        if product["retailer"] != "zinc":
+            next_step = "This catalog provider is not eligible for Zinc batches."
+        emit(self, "cart_added", f"Added {product['name']} × {product['quantity']} to your cart. "
+             f"Saved allowance ${product['max_price']:.2f}. {next_step} No purchase has been made.", order_id=order_id)
         return result
 
     async def queue_next_substitution(self, order_id):
@@ -539,6 +563,7 @@ class ReorderEngine:
                     order["status"] = "submission_unknown"
                 await self.store.save()
             self.publish()
+            emit(self, "attention", f"Batch {batch_id} needs reconciliation. An order may already exist. Check Zinc before any new purchase; do not submit again or clear saved history.", batch_id=batch_id)
             raise
         async with self.lock:
             batch["fulfillment"] = details
@@ -552,6 +577,7 @@ class ReorderEngine:
             await self.store.save()
             report = dict(batch)
         self.publish()
+        emit(self, "order_status", f"{'Sandbox simulation' if sandbox else 'Live order'}: batch {batch_id} is {report['status']}. Placement is not delivery.", batch_id=batch_id)
         return report
 
     async def reconcile_shopping_list(self):
@@ -592,12 +618,15 @@ class ReorderEngine:
                 except Exception:
                     # Provider errors may contain private data; retain only a safe indicator.
                     async with self.lock:
+                        had_error = self.store.data["batches"][batch_id].get("refresh_error", False)
                         self.store.data["batches"][batch_id]["refresh_error"] = True
                         try:
                             await self.store.save()
                         except Exception:
                             _LOGGER.warning("Could not persist Zinc refresh failure indicator")
                     self.publish()
+                    if not had_error:
+                        emit(self, "attention", f"Status refresh failed for batch {batch_id}. The saved order remains protected and tracking will retry. Do not place another order to resolve a tracking error.", batch_id=batch_id)
                     _LOGGER.warning("Zinc status refresh failed; saved order remains protected")
 
     async def refresh_batch_zinc(self, batch_id, client):
@@ -613,6 +642,9 @@ class ReorderEngine:
             raise ValueError("Zinc refresh returned a different order ID; saved batch unchanged")
         status = result["status"]
         async with self.lock:
+            old_status = batch["status"]
+            old_outcome = batch.get("fulfillment", {}).get("outcome")
+            delivered_before = {member_id for member_id in batch["order_ids"] if self.store.data["orders"][member_id].get("delivery_confirmed_at")}
             details = fulfillment_snapshot(result, batch.get("fulfillment"))
             previous_batch = deepcopy(batch)
             previous_orders = {key: deepcopy(self.store.data["orders"][key]) for key in batch["order_ids"]}
@@ -658,6 +690,14 @@ class ReorderEngine:
                             _LOGGER.warning("Could not persist Shopping List synchronization failure")
                     self.publish()
                     _LOGGER.warning("Delivery saved; Shopping List synchronization needs retry")
+        newly_delivered = [member for member in members if member.get("delivery_confirmed_at") and member["id"] not in delivered_before]
+        mode = "Sandbox simulation" if batch["zinc_environment"] == "sandbox" else "Live order"
+        if newly_delivered:
+            names = ", ".join(member["name"] for member in newly_delivered)
+            emit(self, "delivery", f"{mode}: delivery confirmed for {names}. Check the saved Shopping List result; failed or unmatched entries stay open.", batch_id=batch_id)
+        elif old_status != status or (old_outcome != batch.get("fulfillment", {}).get("outcome") and batch.get("fulfillment", {}).get("outcome") in ("partial", "failed")):
+            event = "attention" if status in ("failed", "order_failed", "submission_unknown") or batch.get("fulfillment", {}).get("outcome") in ("partial", "failed") else "order_status"
+            emit(self, event, f"{mode}: batch {batch_id} is {status}. Order placed does not mean delivered. No failed line will be repurchased automatically.", batch_id=batch_id)
         return deepcopy(batch)
 
     async def complete_received_items(self, batch_id, order_ids, simulation, context=None, automatic=False):

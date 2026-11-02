@@ -30,6 +30,36 @@ PRODUCT_SCHEMA = vol.Schema({
     vol.Optional("create_only", default=False): cv.boolean,
 })
 
+def notification_service(value):
+    value = cv.string(value)
+    if not value.startswith("notify.") or value in ("notify.send_message", "notify.persistent_notification") or not value[7:].replace("_", "").isalnum():
+        raise vol.Invalid("Choose a notify action; use notify entities for send_message")
+    return value
+
+
+def kiosk_scale(value):
+    try:
+        number = float(value)
+    except (ValueError, TypeError) as err:
+        raise vol.Invalid("Kiosk scale must be a number from 1 to 4") from err
+    if not math.isfinite(number) or not 1 <= number <= 4:
+        raise vol.Invalid("Kiosk scale must be a number from 1 to 4")
+    return number
+
+
+NOTIFICATION_SCHEMA = vol.Schema({
+    vol.Optional("persistent", default=True): cv.boolean,
+    vol.Optional("events", default=["cart_added", "batch_ready", "delivery", "attention"]):
+        vol.All([vol.In(["cart_added", "batch_ready", "order_status", "delivery", "list_change", "attention"])], vol.Length(max=6)),
+    vol.Optional("notify_services", default=[]): vol.All([notification_service], vol.Length(max=10)),
+    vol.Optional("kiosk_services", default=[]): vol.All([vol.All(cv.string, vol.Match(r"^esphome\.[a-z0-9_]+_notification$"))], vol.Length(max=10)),
+    vol.Optional("kiosk_duration", default=30): vol.All(vol.Coerce(int), vol.Range(min=0, max=300)),
+    vol.Optional("kiosk_chime", default=False): cv.boolean,
+    vol.Optional("kiosk_scale", default=1): kiosk_scale,
+    vol.Optional("notify_entities", default=[]): vol.All([vol.All(cv.entity_id, vol.Match(r"^notify\."))], vol.Length(max=10)),
+})
+
+
 PREFERENCES_SCHEMA = vol.Schema({
     vol.Required("strategy"): vol.In(["manual", "weekly", "rolling"]),
     vol.Required("weekday"): vol.All(vol.Coerce(int), vol.Range(min=0, max=6)),
@@ -37,6 +67,7 @@ PREFERENCES_SCHEMA = vol.Schema({
     vol.Required("rolling_hours"): vol.All(vol.Coerce(int), vol.Range(min=1, max=336)),
     vol.Optional("sync_shopping_list", default=True): cv.boolean,
     vol.Optional("auto_complete_delivered"): cv.boolean,
+    vol.Optional("notification_settings"): NOTIFICATION_SCHEMA,
 })
 
 

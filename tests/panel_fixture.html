@@ -40,8 +40,16 @@ panel.hass = {
       window.snapshot.product_count = window.snapshot.catalog.filter(product => product.enabled).length;
       return { removed: true };
     }
+    if (message.type === 'reorder/notifications_save') {
+      window.snapshot.preferences.notification_settings = structuredClone(message.settings);
+      return {saved: true};
+    }
+    if (message.type === 'reorder/notification_test') {
+      window.snapshot.notification_delivery = {event: 'test', sent: 2, failed: 0};
+      return {sent: 2, failed: 0};
+    }
     if (message.type === 'reorder/preferences_save') {
-      window.snapshot.preferences = structuredClone(message.preferences);
+      window.snapshot.preferences = {...window.snapshot.preferences, ...structuredClone(message.preferences)};
       return structuredClone(message.preferences);
     }
     if (window.failNextAction) { window.failNextAction = false; throw { message: 'Simulated network failure' }; }

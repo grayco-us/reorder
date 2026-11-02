@@ -15,7 +15,8 @@ from .const import DOMAIN
 from .core import norm
 from .fulfillment import mapped_item, receipt_eligible, item_delivery_confirmed
 from .shopping import shopping_items
-from .product_config import PRODUCT_SCHEMA, PREFERENCES_SCHEMA
+from .notifications import settings_for, destinations, async_deliver
+from .product_config import PRODUCT_SCHEMA, PREFERENCES_SCHEMA, NOTIFICATION_SCHEMA
 
 PANEL_PATH = "reorder-app"
 ASSET_PATH = "/reorder-assets"
@@ -87,7 +88,10 @@ def panel_data(engine, entry):
         "intake_events": deepcopy(engine.intake_events),
         "preferences": {**engine.store.data.get("batch_settings", {}),
                         "sync_shopping_list": engine.store.data.get("preferences", {}).get("sync_shopping_list", True),
-                        "auto_complete_delivered": engine.store.data.get("preferences", {}).get("auto_complete_delivered", True)},
+                        "auto_complete_delivered": engine.store.data.get("preferences", {}).get("auto_complete_delivered", True),
+                        "notification_settings": settings_for(engine)},
+        "notification_destinations": destinations(engine.hass),
+        "notification_delivery": deepcopy(engine.notification_delivery),
         "catalog": [{**{field: product.get(field, [] if field in ("aliases", "substitutes") else None)
                          for field in ("name", "aliases", "retailer", "product_id", "quantity", "max_price", "cooldown_hours", "enabled", "substitutes")},
                      "can_rename": not any(order["product_key"] == key for order in engine.store.data["orders"].values())}
@@ -180,6 +184,34 @@ def _manage_engine(hass, connection, msg):
 
 
 @websocket_api.websocket_command({
+    vol.Required("type"): "reorder/notifications_save",
+    vol.Required("entry_id"): str,
+    vol.Required("settings"): NOTIFICATION_SCHEMA,
+})
+@websocket_api.async_response
+async def websocket_notifications_save(hass, connection, msg):
+    engine = _manage_engine(hass, connection, msg)
+    if engine is None:
+        return
+    await engine.update_notifications(msg["settings"])
+    connection.send_result(msg["id"], {"saved": True})
+
+
+@websocket_api.websocket_command({
+    vol.Required("type"): "reorder/notification_test",
+    vol.Required("entry_id"): str,
+})
+@websocket_api.async_response
+async def websocket_notification_test(hass, connection, msg):
+    engine = _manage_engine(hass, connection, msg)
+    if engine is None:
+        return
+    result = await async_deliver(engine, "cart_added",
+        "This is a test of your saved notification destinations. No cart, batch, Shopping List item or purchase was changed.", test=True)
+    connection.send_result(msg["id"], result)
+
+
+@websocket_api.websocket_command({
     vol.Required("type"): "reorder/sandbox_submit",
     vol.Required("entry_id"): str,
     vol.Required("batch_id"): str,
@@ -238,7 +270,7 @@ async def async_setup_panel(hass, entry):
         ])
         hass.data[_STATIC_KEY] = True
     if not hass.data.get(_WS_KEY):
-        for handler in (websocket_panel, websocket_product_save, websocket_product_remove, websocket_preferences_save, websocket_sandbox_submit, websocket_receive_items):
+        for handler in (websocket_panel, websocket_product_save, websocket_product_remove, websocket_preferences_save, websocket_sandbox_submit, websocket_receive_items, websocket_notification_test, websocket_notifications_save):
             websocket_api.async_register_command(hass, handler)
         hass.data[_WS_KEY] = True
     if PANEL_PATH in hass.data.get(frontend.DATA_PANELS, {}):

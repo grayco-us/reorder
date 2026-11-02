@@ -2,6 +2,15 @@
 
 Home Assistant custom integration for routing exact, preapproved shopping-list items to a persistent order queue, with **Zinc API submission (sandbox first)**.
 
+## v0.9.0: Configurable cart and review notifications
+
+**Reorder → Settings → Notifications** controls cart additions, prepared-batch review
+reminders, status changes, confirmed delivery, cart edits and attention alerts. Choose
+Home Assistant notifications, loaded phone/notify destinations, or Kiosk Satellite's
+built-in ESPHome notification cards. Set kiosk duration, text scale and chime; save and
+use the test button. No reminder or notification tap purchases or approves anything.
+See [NOTIFICATIONS.md](NOTIFICATIONS.md) for voice-to-cart behavior, recipients and setup.
+
 ## v0.8.1: First live-trial guidance
 
 Mode-specific helper text, state definitions and action/field descriptions now explain

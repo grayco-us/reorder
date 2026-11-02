@@ -1,4 +1,4 @@
-# Reorder sidebar app (v0.8.1)
+# Reorder sidebar app (v0.9.0)
 
 Reorder now bundles its own responsive frontend and automatically adds **Reorder**
 to Home Assistant's sidebar. There is no dashboard YAML to paste, no resource URL
@@ -155,3 +155,10 @@ The mode notice explains Sandbox, Live disabled and Live enabled. Expand **What 
 terms mean** for queue/batch states, ceilings, delivery, list completion and recovery.
 See [LIVE_TESTING.md](LIVE_TESTING.md) for the native action used for a first real order.
 The app has no live submit button; purchasing controls and safeguards are unchanged.
+
+## Notifications
+
+Settings now includes event selection, destination pickers, Kiosk Satellite card
+presentation and a test button. Cart additions mean local queued requests, and batch
+review reminders mean saved unsubmitted work. Nothing is bought from a notification.
+See [NOTIFICATIONS.md](NOTIFICATIONS.md) for setup and delivery guarantees.

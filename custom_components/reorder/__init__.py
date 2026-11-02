@@ -15,7 +15,7 @@ from .const import DOMAIN
 from .store import ReorderStore
 from .core import ReorderEngine
 from .zinc import ZincClient
-from .batch import cancel_batch, create_batch, preview, review_batch, scheduled_due
+from .batch import batch_status_label, cancel_batch, create_batch, preview, review_batch, scheduled_due
 from homeassistant.helpers.event import async_track_time_interval
 from datetime import timedelta
 from homeassistant.util import dt as dt_util
@@ -113,8 +113,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         report = preview(store.data)
         async_notify(
             hass,
-            f"{report['count']} eligible products; combined ceiling ${report['price_ceiling']:.2f}. "
-            "Review individual products in the Reorder sensor attributes. This is not a price quote.",
+            f"Your cart has {report['count']} eligible product line(s), with a combined spending limit of ${report['price_ceiling']:.2f}. "
+            "Open Reorder → Queue to review and prepare a batch. Nothing has been purchased; this is not a price quote.",
             title="Reorder — Batch Preview", notification_id="reorder_batch_preview")
         return report
 
@@ -126,7 +126,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         async_notify(
             hass,
             f"Batch {batch['id']} contains {len(batch['order_ids'])} product lines. "
-            f"Price ceiling ${batch['max_price']:.2f}. No order placed.",
+            f"Combined spending limit ${batch['max_price']:.2f}. Open Reorder to review saved products and quantities before explicitly submitting. No order placed.",
             title="Reorder — Batch Ready", notification_id=f"reorder_batch_{batch['id']}")
         return dict(batch)
 
@@ -168,9 +168,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         mode = "Sandbox simulation" if report["zinc_environment"] == "sandbox" else "Live order"
         async_notify(
             hass,
-            f"Batch {report['id']}: {report['status']}. {mode}. "
+            f"Batch {report['id']}: {batch_status_label(report['status'])} ({report['status']}). {mode}. "
             f"Zinc order ID: {report['zinc_order_id']}. "
-            "See Prepared batches attributes for saved details.",
+            "Open Reorder for saved product outcomes and tracking. Order placed does not mean delivered; no list item is completed merely by placement.",
             title=f"Reorder — Batch {operation}",
             notification_id=f"reorder_batch_{report['id']}",
         )

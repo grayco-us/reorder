@@ -247,3 +247,50 @@ test("tracking and partial failures are visible with escaped safe links and pric
   view._submit({preventDefault() {}, target: {dataset: {form: "preferences"}}});
   assert.equal(calls[0][1].preferences.auto_complete_delivered, false);
  });
+
+ test("notification settings list real destinations and save through a management-only endpoint", () => {
+  const view = panel();
+  const html = view._notificationsPage();
+  assert.match(html, /esphome.kitchen_tablet_notification/);
+  assert.match(html, /Tap dismisses a card/);
+  assert.match(html, /never approves or buys/);
+  view._notificationDraft = {persistent: false, events: ["cart_added", "batch_ready"], notify_services: ["notify.test_phone"], notify_entities: [], kiosk_services: ["esphome.kitchen_tablet_notification"], kiosk_duration: 30, kiosk_chime: false, kiosk_scale: 1};
+  const calls = [];
+  view._manage = (...args) => calls.push(args);
+  view._submit({preventDefault() {}, target: {dataset: {form: "notifications"}}});
+  assert.equal(calls[0][0], "reorder/notifications_save");
+  assert.equal(calls[0][1].settings.kiosk_chime, false);
+  assert.doesNotMatch(JSON.stringify(calls), /submit_batch_zinc|confirmation/);
+ });
+
+ test("notification settings escape destination labels and retain unavailable choices", () => {
+  const view = panel();
+  view._data.notification_destinations.entities[0].name = '<img src=x onerror=alert(1)>';
+  view._data.preferences.notification_settings = {persistent: false, events: [], notify_services: ["notify.unavailable"], notify_entities: [], kiosk_services: []};
+  const html = view._notificationsPage();
+  assert.match(html, /&lt;img/);
+  assert.doesNotMatch(html, /<img/);
+  assert.match(html, /Notify: unavailable — unavailable/);
+ });
+
+ test("notification test uses only the test endpoint and reports failures", async () => {
+  const view = panel();
+  const calls = [];
+  view._hass.callWS = async message => {calls.push(message); return message.type === "reorder/panel" ? makePanelData() : {sent: 1, failed: 1};};
+  await view._testNotification();
+  assert.equal(calls[0].type, "reorder/notification_test");
+  assert.match(view._notice, /1 sent, 1 failed/);
+  assert.doesNotMatch(JSON.stringify(calls), /submit|call_service/);
+ });
+
+ test("saving notification settings preserves other unsaved form drafts", async () => {
+  const view = panel();
+  view._productDraft = {name: "Unsaved"};
+  view._preferencesDraft = {strategy: "weekly"};
+  view._notificationDraft = {persistent: false};
+  view._hass.callWS = async message => message.type === "reorder/panel" ? makePanelData() : {};
+  await view._manage("reorder/notifications_save", {settings: {}}, "Saved");
+  assert.equal(view._productDraft.name, "Unsaved");
+  assert.equal(view._preferencesDraft.strategy, "weekly");
+  assert.equal(view._notificationDraft, null);
+ });

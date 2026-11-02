@@ -733,7 +733,7 @@ class BatchActionsTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(panel.sidebar_title, "Reorder")
         self.assertTrue(panel.require_admin)
         self.assertEqual(panel.config["entry_id"], self.entry.entry_id)
-        self.assertEqual(panel.config["_panel_custom"]["module_url"], "/reorder-assets/reorder-panel.js?v=0.8.1")
+        self.assertEqual(panel.config["_panel_custom"]["module_url"], "/reorder-assets/reorder-panel.js?v=0.9.0")
         self.assertEqual(panel.config["_panel_custom"]["name"], "reorder-panel")
 
     async def test_sidebar_snapshot_excludes_credentials_and_preserves_data(self):
@@ -1208,9 +1208,9 @@ class BatchActionsTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_management_commands_reject_non_admin_users(self):
         from types import SimpleNamespace
-        from custom_components.reorder.frontend import websocket_product_save, websocket_product_remove, websocket_preferences_save, websocket_sandbox_submit, websocket_receive_items
+        from custom_components.reorder.frontend import websocket_product_save, websocket_product_remove, websocket_preferences_save, websocket_sandbox_submit, websocket_receive_items, websocket_notification_test, websocket_notifications_save
         before = deepcopy(self.engine.store.data)
-        for handler in (websocket_product_save, websocket_product_remove, websocket_preferences_save, websocket_sandbox_submit, websocket_receive_items):
+        for handler in (websocket_product_save, websocket_product_remove, websocket_preferences_save, websocket_sandbox_submit, websocket_receive_items, websocket_notification_test, websocket_notifications_save):
             connection = MagicMock(user=SimpleNamespace(is_admin=False))
             await handler.__wrapped__(self.hass, connection, {"id": 1, "entry_id": self.entry.entry_id})
             connection.send_error.assert_called_once_with(1, "unauthorized", "Administrator access is required")
@@ -1720,6 +1720,237 @@ class BatchActionsTest(unittest.IsolatedAsyncioTestCase):
         count = self.transport.await_count
         await self.engine.refresh_pending_batches(ZincClient(None, "zn_test_fake"), "sandbox")
         self.assertEqual(count, self.transport.await_count)
+
+    async def configure_notification_destinations(self, events=None, failure=False):
+        import voluptuous as vol
+        self.notification_calls = []
+        async def record(call):
+            self.notification_calls.append((call.domain, call.service, dict(call.data)))
+            if failure:
+                raise HomeAssistantError("synthetic destination failure")
+        self.hass.services.async_register("notify", "test_phone", record,
+            schema=vol.Schema({vol.Required("message"): str, vol.Optional("title"): str}))
+        self.hass.services.async_register("notify", "send_message", record,
+            schema=vol.Schema({vol.Required("message"): str, vol.Optional("entity_id"): vol.Any(str, [str])}))
+        self.hass.services.async_register("esphome", "kitchen_tablet_notification", record,
+            schema=vol.Schema({vol.Required("message"): str, vol.Required("title"): str,
+                vol.Required("duration"): int, vol.Required("type"): str, vol.Required("chime"): bool,
+                vol.Required("scale"): float, vol.Required("icon"): str, vol.Required("chime_file"): str,
+                vol.Required("volume"): int, vol.Required("image"): str}))
+        self.hass.states.async_set("notify.test_display", "unknown", {"friendly_name": "Test display"})
+        await self.engine.update_notifications({"persistent": False,
+            "events": events if events is not None else ["cart_added", "batch_ready", "order_status", "delivery", "attention", "list_change"],
+            "notify_services": ["notify.test_phone"], "notify_entities": ["notify.test_display"],
+            "kiosk_services": ["esphome.kitchen_tablet_notification"], "kiosk_duration": 45,
+            "kiosk_chime": False, "kiosk_scale": 1.5})
+
+    async def test_notifications_cart_and_ready_route_once_after_saved_state(self):
+        await self.configure_notification_destinations()
+        await self.configure_coffee()
+        await self.add_shopping_item("coffee")
+        self.assertEqual(len(self.notification_calls), 3)
+        for _, _, data in self.notification_calls:
+            self.assertIn("Added Coffee", data["message"])
+            self.assertIn("No purchase", data["message"])
+        batch = await self.prepare()
+        await self.hass.async_block_till_done()
+        self.assertEqual(len(self.notification_calls), 6)
+        self.assertIn(batch["id"], self.engine.store.data["batches"])
+        self.assertTrue(all("Nothing has been purchased" in data["message"] for _, _, data in self.notification_calls[3:]))
+        item = self.hass.data["shopping_list"].items[-1]
+        await self.engine.handle_shopping_event("add", item)
+        with self.assertRaises(HomeAssistantError):
+            await self.prepare()
+        await self.hass.async_block_till_done()
+        self.assertEqual(len(self.notification_calls), 6)
+        self.transport.assert_not_awaited()
+
+    async def test_kiosk_payload_uses_documented_action_and_configured_options(self):
+        from custom_components.reorder.notifications import async_deliver
+        await self.configure_notification_destinations()
+        result = await async_deliver(self.engine, "batch_ready", "Review the saved batch.", batch_id="example")
+        self.assertEqual(result, {"sent": 3, "failed": 0})
+        _, service, data = self.notification_calls[-1]
+        self.assertEqual(service, "kitchen_tablet_notification")
+        self.assertEqual(data["duration"], 45)
+        self.assertFalse(data["chime"])
+        self.assertEqual(data["scale"], 1.5)
+        self.assertEqual(data["type"], "warning")
+        self.assertEqual(data["image"], "")
+        self.assertNotIn("confirmation", data)
+        self.transport.assert_not_awaited()
+
+    async def test_notify_entity_uses_title_free_supported_message_api(self):
+        from custom_components.reorder.notifications import async_deliver
+        await self.configure_notification_destinations()
+        await async_deliver(self.engine, "cart_added", "Saved locally.")
+        data = self.notification_calls[1][2]
+        self.assertEqual(data["entity_id"], "notify.test_display")
+        self.assertNotIn("title", data)
+        self.assertIn("Reorder", data["message"])
+
+    async def test_notification_failures_do_not_change_cart_or_batch_results(self):
+        await self.configure_notification_destinations(failure=True)
+        await self.configure_coffee()
+        with self.assertLogs("custom_components.reorder", level="WARNING"):
+            await self.add_shopping_item("coffee")
+            batch = await self.prepare()
+            await self.hass.async_block_till_done()
+        self.assertEqual(len(self.coffee_orders()), 1)
+        self.assertEqual(self.engine.store.data["batches"][batch["id"]]["status"], "ready")
+        self.assertEqual(self.engine.notification_delivery["failed"], 3)
+        self.transport.assert_not_awaited()
+
+    async def test_disabled_events_and_no_destinations_do_not_notify(self):
+        from custom_components.reorder.notifications import async_deliver
+        await self.configure_notification_destinations(events=[])
+        await self.configure_coffee()
+        await self.add_shopping_item("coffee")
+        await self.prepare()
+        await self.hass.async_block_till_done()
+        self.assertEqual(self.notification_calls, [])
+        await self.engine.update_notifications({"persistent": False})
+        result = await async_deliver(self.engine, "cart_added", "No recipients", test=True)
+        self.assertEqual(result, {"sent": 0, "failed": 0})
+        self.transport.assert_not_awaited()
+
+    async def test_test_notification_uses_saved_settings_without_mutation_or_purchase(self):
+        from custom_components.reorder.frontend import websocket_notification_test
+        await self.configure_notification_destinations(events=[])
+        before = deepcopy(self.engine.store.data)
+        connection = await self.admin_command(websocket_notification_test)
+        connection.send_error.assert_not_called()
+        self.assertEqual(connection.send_result.call_args.args[1], {"sent": 3, "failed": 0})
+        self.assertEqual(before, self.engine.store.data)
+        self.assertTrue(all("test" in data["message"].lower() for _, _, data in self.notification_calls))
+        self.transport.assert_not_awaited()
+
+    async def test_notification_settings_validate_allowlist_preserve_preferences_and_rollback(self):
+        import voluptuous as vol
+        original = deepcopy(self.engine.store.data)
+        for values in ({"notify_services": ["reorder.submit_batch_zinc"]},
+                       {"kiosk_services": ["esphome.kitchen_shizuku_command"]},
+                       {"notify_entities": ["script.purchase"]}, {"kiosk_duration": -1},
+                       {"kiosk_scale": 9}, {"kiosk_scale": "nan"}, {"events": ["purchase"]}):
+            with self.assertRaises(vol.Invalid):
+                await self.engine.update_notifications(values)
+        self.assertEqual(original, self.engine.store.data)
+        with patch.object(self.engine.store, "save", side_effect=OSError("disk full")):
+            with self.assertRaises(OSError):
+                await self.engine.update_notifications({"persistent": False})
+        self.assertEqual(original, self.engine.store.data)
+        await self.engine.update_notifications({"persistent": False, "notify_services": ["notify.phone", "notify.phone"]})
+        self.assertEqual(self.engine.store.data["preferences"]["notification_settings"]["notify_services"], ["notify.phone"])
+        await self.engine.update_preferences(strategy="manual", weekday=6, hour=10, rolling_hours=48)
+        self.assertFalse(self.engine.store.data["preferences"]["notification_settings"]["persistent"])
+
+    async def test_notification_settings_survive_reload_and_discover_kiosk_only_actions(self):
+        from custom_components.reorder.frontend import panel_data
+        await self.configure_notification_destinations()
+        self.hass.services.async_register("esphome", "kitchen_shizuku_command", AsyncMock())
+        self.hass.services.async_register("esphome", "kitchen_notification_dismiss", AsyncMock())
+        snapshot = panel_data(self.engine, self.entry)
+        self.assertEqual(snapshot["notification_destinations"]["kiosks"], ["esphome.kitchen_tablet_notification"])
+        restored = ReorderStore(self.hass)
+        await restored.load()
+        self.assertEqual(restored.data["preferences"]["notification_settings"], self.engine.store.data["preferences"]["notification_settings"])
+        self.assertNotIn("reorder.submit_batch_zinc", str(snapshot["notification_destinations"]))
+
+    async def test_repeated_status_refresh_does_not_repeat_external_notifications(self):
+        await self.configure_notification_destinations(events=["order_status"])
+        batch = await self.prepare()
+        await self.submit(batch)
+        await self.hass.async_block_till_done()
+        self.notification_calls.clear()
+        self.transport.return_value = {"id": "mock-zinc-id", "status": "order_placed"}
+        await self.call("refresh_batch_zinc", {"batch_id": batch["id"]})
+        await self.hass.async_block_till_done()
+        self.assertEqual(len(self.notification_calls), 3)
+        await self.call("refresh_batch_zinc", {"batch_id": batch["id"]})
+        await self.hass.async_block_till_done()
+        self.assertEqual(len(self.notification_calls), 3)
+
+    async def test_unknown_submission_notifies_attention_without_retrying(self):
+        await self.configure_notification_destinations(events=["attention"])
+        batch = await self.prepare()
+        self.transport.side_effect = TimeoutError("synthetic uncertainty")
+        with self.assertRaises(TimeoutError):
+            await self.submit(batch)
+        await self.hass.async_block_till_done()
+        self.assertEqual(len(self.notification_calls), 3)
+        self.assertIn("may already exist", self.notification_calls[-1][2]["message"])
+        self.transport.assert_awaited_once()
+
+    async def test_real_notify_entity_without_title_feature_receives_plain_message(self):
+        from homeassistant.components import notify
+        from homeassistant.setup import async_setup_component
+        received = []
+        class Display(notify.NotifyEntity):
+            _attr_name = "Reorder notify regression"
+            _attr_should_poll = False
+            async def async_send_message(self, message, title=None):
+                received.append((message, title))
+        self.assertTrue(await async_setup_component(self.hass, "notify", {}))
+        component = self.hass.data[notify.DATA_COMPONENT]
+        display = Display()
+        await component.async_add_entities([display])
+        await self.engine.update_notifications({"persistent": False, "notify_entities": [display.entity_id]})
+        from custom_components.reorder.notifications import async_deliver
+        report = await async_deliver(self.engine, "cart_added", "Saved cart entry.")
+        self.assertEqual(report, {"sent": 1, "failed": 0})
+        self.assertEqual(len(received), 1)
+        self.assertIn("Saved cart entry", received[0][0])
+        self.assertIsNone(received[0][1])
+        self.transport.assert_not_awaited()
+
+    async def test_saved_batch_retires_superseded_persistent_cart_notices(self):
+        await self.configure_coffee()
+        await self.add_shopping_item("coffee")
+        saved = self.coffee_orders()[0]
+        self.assertIn("reorder_" + saved["id"], self.hass.data["persistent_notification"])
+        batch = await self.prepare()
+        await self.hass.async_block_till_done()
+        self.assertNotIn("reorder_" + saved["id"], self.hass.data["persistent_notification"])
+        self.assertIn("reorder_batch_" + batch["id"], self.hass.data["persistent_notification"])
+        self.transport.assert_not_awaited()
+
+    async def test_older_kiosk_schema_receives_only_declared_arguments(self):
+        import voluptuous as vol
+        from custom_components.reorder.notifications import async_deliver
+        await self.configure_notification_destinations()
+        received = []
+        async def kiosk(call):
+            received.append(dict(call.data))
+        self.hass.services.async_register("esphome", "kitchen_tablet_notification", kiosk,
+            schema=vol.Schema({vol.Required("message"): str, vol.Required("title"): str,
+                               vol.Required("duration"): int}))
+        report = await async_deliver(self.engine, "cart_added", "Saved locally.")
+        self.assertEqual(report, {"sent": 3, "failed": 0})
+        self.assertEqual(set(received[0]), {"message", "title", "duration"})
+        self.assertEqual(received[0]["duration"], 45)
+
+    async def test_confirmed_delivery_notifies_only_once_and_reports_sandbox_mode(self):
+        await self.configure_notification_destinations(events=["delivery"])
+        batch, saved = await self.delivered_coffee()
+        await self.engine.refresh_batch_zinc(batch["id"], ZincClient(None, "zn_test_fake"))
+        await self.hass.async_block_till_done()
+        self.assertEqual(len(self.notification_calls), 3)
+        self.assertIn("Sandbox simulation", self.notification_calls[-1][2]["message"])
+        self.assertTrue(self.hass.data["shopping_list"].items[-1]["complete"])
+        await self.engine.refresh_batch_zinc(batch["id"], ZincClient(None, "zn_test_fake"))
+        await self.hass.async_block_till_done()
+        self.assertEqual(len(self.notification_calls), 3)
+
+    async def test_cart_save_failure_never_sends_added_notification(self):
+        await self.configure_notification_destinations()
+        await self.configure_coffee()
+        with patch.object(self.engine.store, "save", side_effect=OSError("disk full")):
+            with self.assertRaises(OSError):
+                await self.engine.match_new_item({"id": "unsaved-item", "name": "coffee"})
+        await self.hass.async_block_till_done()
+        self.assertEqual(self.notification_calls, [])
+        self.assertEqual(self.coffee_orders(), [])
+        self.transport.assert_not_awaited()
 
     async def test_missing_shipping_address_blocks_submission(self):
         batch = await self.prepare()

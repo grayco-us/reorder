@@ -3,6 +3,7 @@ from copy import deepcopy
 from datetime import timedelta
 from uuid import uuid4
 from homeassistant.util import dt as dt_util
+from .notifications import emit, dismiss_cart
 
 ACTIVE = {"queued", "approved"}
 
@@ -60,6 +61,8 @@ async def create_batch(engine, retailer="zinc", max_items=10):
                 order.pop("batch_id", None)
             raise
     engine.publish()
+    dismiss_cart(engine, batch["order_ids"])
+    emit(engine, "batch_ready", f"Your batch is ready for review: {len(orders)} product line(s), combined spending limit ${batch['max_price']:.2f}. Review saved products and quantities before explicitly submitting. Nothing has been purchased.", batch_id=batch_id)
     return batch
 
 

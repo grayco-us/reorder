@@ -2,6 +2,7 @@ export function makePanelData() {
   return {
     mode: "Sandbox", product_count: 3, shopping_list_ready: true,
     preferences: { strategy: "manual", weekday: 6, hour: 10, rolling_hours: 48, sync_shopping_list: true },
+    notification_destinations: {services: ["notify.test_phone"], entities: [{id: "notify.test_display", name: "Hall display"}], kiosks: ["esphome.kitchen_tablet_notification"]},
     catalog: [
       { name: "Morning coffee", aliases: ["coffee"], enabled: true, retailer: "zinc", product_id: "https://example.com/coffee", quantity: 1, max_price: 18, cooldown_hours: 168, substitutes: [], can_rename: false },
       { name: "Cat litter", aliases: [], enabled: true, retailer: "zinc", product_id: "https://example.com/cat-litter", quantity: 2, max_price: 35, cooldown_hours: 168, substitutes: [], can_rename: false },
