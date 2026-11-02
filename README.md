@@ -2,6 +2,20 @@
 
 Home Assistant custom integration for routing exact, preapproved shopping-list items to a persistent order queue, with **Zinc API submission (sandbox first)**.
 
+## v0.7.0: Sandbox submission, tracking and explicit list receipt
+
+Ready sandbox batches can now be submitted from the sidebar after typing **SANDBOX**.
+The server independently requires a `zn_test_` key; live purchase controls are not
+exposed. Refresh retains safe per-item outcomes, partial failures, tracking and reported
+costs. Placement and delivery remain distinct; no list item is cleared automatically.
+
+Use **Complete test list items**, select successful linked lines, and type **SIMULATE
+RECEIPT** to exercise list completion without claiming provider delivery. Failed/skipped,
+renamed, missing or ambiguous lines stay untouched. Existing live-order list maintenance
+requires explicit per-item delivery and its own confirmation. Confirmed receipt/delivery
+permits future requests only after the configured cooldown, without resubmitting an old
+order. See the [full order-stage test guide](ORDERING.md).
+
 ## v0.6.0: Shopping List synchronization and in-app setup
 
 Reorder now handles renames, completion/unchecking, removal, and bulk list changes.

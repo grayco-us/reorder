@@ -1,8 +1,16 @@
 """Minimal Zinc REST client. Never logs credentials or shipping details."""
 import aiohttp
 from homeassistant.exceptions import HomeAssistantError
+from .fulfillment import safe_code
 
 API = "https://api.zinc.com"
+
+
+class ZincRequestError(HomeAssistantError):
+    """Keep only status and a machine-readable code, never raw error text."""
+    def __init__(self, status, code=None):
+        self.status, self.code = status, code
+        super().__init__(f"Zinc returned HTTP {status}" + (f" ({code})" if code else ""))
 
 
 class ZincClient:
@@ -19,7 +27,14 @@ class ZincClient:
             ) as response:
                 # Do not persist sensitive response bodies from failed requests.
                 if response.status >= 400:
-                    raise HomeAssistantError(f"Zinc returned HTTP {response.status}")
+                    code = None
+                    try:
+                        body = await response.json()
+                        if isinstance(body, dict):
+                            code = safe_code(body.get("code") or body.get("error_code"))
+                    except (ValueError, aiohttp.ClientError):
+                        pass
+                    raise ZincRequestError(response.status, code)
                 return await response.json()
         except (aiohttp.ClientError, TimeoutError) as err:
             raise HomeAssistantError("Unable to communicate with Zinc") from err

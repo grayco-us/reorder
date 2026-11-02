@@ -733,7 +733,7 @@ class BatchActionsTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(panel.sidebar_title, "Reorder")
         self.assertTrue(panel.require_admin)
         self.assertEqual(panel.config["entry_id"], self.entry.entry_id)
-        self.assertEqual(panel.config["_panel_custom"]["module_url"], "/reorder-assets/reorder-panel.js?v=0.6.0")
+        self.assertEqual(panel.config["_panel_custom"]["module_url"], "/reorder-assets/reorder-panel.js?v=0.7.0")
         self.assertEqual(panel.config["_panel_custom"]["name"], "reorder-panel")
 
     async def test_sidebar_snapshot_excludes_credentials_and_preserves_data(self):
@@ -1208,9 +1208,9 @@ class BatchActionsTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_management_commands_reject_non_admin_users(self):
         from types import SimpleNamespace
-        from custom_components.reorder.frontend import websocket_product_save, websocket_product_remove, websocket_preferences_save
+        from custom_components.reorder.frontend import websocket_product_save, websocket_product_remove, websocket_preferences_save, websocket_sandbox_submit, websocket_receive_items
         before = deepcopy(self.engine.store.data)
-        for handler in (websocket_product_save, websocket_product_remove, websocket_preferences_save):
+        for handler in (websocket_product_save, websocket_product_remove, websocket_preferences_save, websocket_sandbox_submit, websocket_receive_items):
             connection = MagicMock(user=SimpleNamespace(is_admin=False))
             await handler.__wrapped__(self.hass, connection, {"id": 1, "entry_id": self.entry.entry_id})
             connection.send_error.assert_called_once_with(1, "unauthorized", "Administrator access is required")
@@ -1295,6 +1295,236 @@ class BatchActionsTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.engine.intake_events[0]["reason"], "submitted_unchanged")
         self.transport.assert_awaited_once()
 
+    def provider_item(self, order, status="ordered", error=None):
+        return {"id": "provider-" + order["id"], "url": order["product_id"],
+                "quantity": order["quantity"], "status": status, "error_type": error}
+
+    async def test_app_submission_is_sandbox_only_and_reuses_native_guards(self):
+        from custom_components.reorder.frontend import websocket_sandbox_submit
+        batch = await self.prepare()
+        before = deepcopy(self.engine.store.data)
+        self.hass.config_entries.async_update_entry(self.entry, options=self.options | {"zinc_api_key": "zn_live_not-a-real-key", "zinc_live_enabled": True})
+        connection = await self.admin_command(websocket_sandbox_submit, batch_id=batch["id"], confirmation="SANDBOX")
+        connection.send_error.assert_called_once()
+        self.assertEqual(self.engine.store.data, before)
+        self.transport.assert_not_awaited()
+        self.hass.config_entries.async_update_entry(self.entry, options=self.options)
+        connection = await self.admin_command(websocket_sandbox_submit, batch_id=batch["id"], confirmation="SANDBOX")
+        connection.send_error.assert_not_called()
+        self.transport.assert_awaited_once()
+        with self.assertRaises(HomeAssistantError):
+            await self.admin_command(websocket_sandbox_submit, batch_id=batch["id"], confirmation="SANDBOX")
+        self.transport.assert_awaited_once()
+
+    async def test_refresh_exposes_sanitized_tracking_cost_and_item_failure(self):
+        import json
+        from custom_components.reorder.frontend import panel_data
+        batch = await self.prepare()
+        await self.submit(batch)
+        self.transport.return_value = {"id": "mock-zinc-id", "status": "order_failed",
+            "items": [self.provider_item(self.engine.store.data["orders"]["1"], "failed", "product_out_of_stock")],
+            "tracking_numbers": [{"carrier": "usps", "tracking_number": "TEST123", "status": "in_transit", "zinc_tracking_url": "https://www.17track.net/test", "estimated_delivery_date": "2026-11-06", "delivery_proof_url": "https://example.com/private-address-photo"}],
+            "job_result": {"error_type": "product_out_of_stock", "error": "Private address and API key must not be retained", "price_components": {"total": 1234, "tax": 100}, "shipping_address": {"first_name": "private"}},
+            "shipping_address": {"first_name": "private"}, "api_key": "zn_test_private"}
+        report = await self.call("refresh_batch_zinc", {"batch_id": batch["id"]}, response=True)
+        details = report["fulfillment"]
+        self.assertEqual(details["error_code"], "product_out_of_stock")
+        self.assertEqual(details["prices_cents"]["total"], 1234)
+        self.assertEqual(details["shipments"][0]["tracking_number"], "TEST123")
+        self.assertEqual(details["items"][0]["status"], "failed")
+        serialized = json.dumps(panel_data(self.engine, self.entry))
+        for private in ("private-address-photo", "shipping_address", "zn_test_private", "Private address"):
+            self.assertNotIn(private, serialized)
+        self.assertEqual(report["status"], "order_failed")
+
+    async def test_order_placed_alone_never_updates_the_shopping_list(self):
+        from custom_components.reorder.frontend import panel_data
+        await self.configure_coffee()
+        await self.add_shopping_item("coffee")
+        batch = await self.prepare()
+        await self.submit(batch)
+        self.transport.return_value = {"id": "mock-zinc-id", "status": "order_placed"}
+        await self.call("refresh_batch_zinc", {"batch_id": batch["id"]})
+        self.assertFalse(self.hass.data["shopping_list"].items[-1]["complete"])
+        self.assertEqual(panel_data(self.engine, self.entry)["batches"][0]["receivable_order_ids"], [])
+
+    async def test_explicit_sandbox_receipt_completes_only_the_selected_uuid(self):
+        from custom_components.reorder.frontend import websocket_receive_items
+        await self.configure_coffee()
+        await self.add_shopping_item("coffee")
+        first_item = self.hass.data["shopping_list"].items[-1]
+        await self.add_shopping_item("coffee")  # Same name, distinct source ID; not linked to an order.
+        other_item = self.hass.data["shopping_list"].items[-1]
+        batch = await self.prepare()
+        await self.submit(batch)
+        saved = self.coffee_orders()[0]
+        self.transport.return_value = {"id": "mock-zinc-id", "status": "order_placed", "items": [self.provider_item(saved)]}
+        await self.call("refresh_batch_zinc", {"batch_id": batch["id"]})
+        count = self.transport.await_count
+        result = await self.admin_command(websocket_receive_items, batch_id=batch["id"], order_ids=[saved["id"]], confirmation="SIMULATE RECEIPT")
+        await self.hass.async_block_till_done()
+        self.assertTrue(first_item["complete"])
+        self.assertFalse(other_item["complete"])
+        self.assertEqual(result.send_result.call_args.args[1]["results"][0]["status"], "completed")
+        self.assertEqual(saved["status"], "order_placed")
+        self.assertEqual(self.transport.await_count, count)  # List update made no Zinc request.
+        result = await self.admin_command(websocket_receive_items, batch_id=batch["id"], order_ids=[saved["id"]], confirmation="SIMULATE RECEIPT")
+        self.assertEqual(result.send_result.call_args.args[1]["results"][0]["status"], "already_complete")
+
+    async def test_partial_failure_does_not_complete_failed_or_skipped_items(self):
+        await self.configure_coffee()
+        await self.add_shopping_item("coffee")
+        await self.configure_coffee(name="Tea", aliases=[], product_id="https://zinc.com/shop/products/test-out-of-stock")
+        await self.add_shopping_item("Tea")
+        batch = await self.prepare()
+        await self.submit(batch)
+        coffee = self.coffee_orders()[0]
+        tea = next(order for order in self.engine.store.data["orders"].values() if order["product_key"] == "tea")
+        self.transport.return_value = {"id": "mock-zinc-id", "status": "order_placed", "items": [self.provider_item(coffee), self.provider_item(tea, "skipped", "product_out_of_stock")]}
+        report = await self.call("refresh_batch_zinc", {"batch_id": batch["id"]}, response=True)
+        self.assertEqual(report["fulfillment"]["outcome"], "partial")
+        with self.assertRaisesRegex(ValueError, "not confirmed"):
+            await self.engine.complete_received_items(batch["id"], [coffee["id"], tea["id"]], True)
+        self.assertTrue(all(not item["complete"] for item in self.hass.data["shopping_list"].items))
+        await self.engine.complete_received_items(batch["id"], [coffee["id"]], True)
+        self.assertTrue(self.hass.data["shopping_list"].items[0]["complete"])
+        self.assertFalse(self.hass.data["shopping_list"].items[1]["complete"])
+
+    async def test_receipt_skips_renamed_or_removed_items(self):
+        await self.configure_coffee()
+        await self.add_shopping_item("coffee")
+        batch = await self.prepare()
+        await self.submit(batch)
+        saved = self.coffee_orders()[0]
+        self.transport.return_value = {"id": "mock-zinc-id", "status": "order_placed", "items": [self.provider_item(saved)]}
+        await self.call("refresh_batch_zinc", {"batch_id": batch["id"]})
+        await self.source_change(name="Unrelated new request")
+        report = await self.engine.complete_received_items(batch["id"], [saved["id"]], True)
+        self.assertEqual(report["results"][0]["status"], "skipped_renamed")
+        item = self.hass.data["shopping_list"].items[-1]
+        self.assertFalse(item["complete"])
+        await self.hass.data["shopping_list"].async_remove(item["id"])
+        await self.hass.async_block_till_done()
+        report = await self.engine.complete_received_items(batch["id"], [saved["id"]], True)
+        self.assertEqual(report["results"][0]["status"], "skipped_missing")
+
+    async def test_live_receipt_requires_explicit_item_delivery_not_tracking_alone(self):
+        await self.configure_coffee()
+        await self.add_shopping_item("coffee")
+        batch = await self.prepare()
+        await self.submit(batch)
+        saved = self.coffee_orders()[0]
+        stored = self.engine.store.data["batches"][batch["id"]]
+        stored["zinc_environment"] = "live"  # Synthetic stored state; no live request is made.
+        saved["zinc_environment"] = "live"
+        self.transport.return_value = {"id": "mock-zinc-id", "status": "order_placed", "items": [self.provider_item(saved, "ordered")], "tracking_numbers": [{"status": "delivered"}]}
+        from custom_components.reorder.fulfillment import fulfillment_snapshot
+        stored["status"] = "order_placed"
+        stored["fulfillment"] = fulfillment_snapshot(self.transport.return_value)
+        with self.assertRaises(ValueError):
+            await self.engine.complete_received_items(batch["id"], [saved["id"]], False)
+        stored["fulfillment"]["items"][0]["status"] = "delivered"
+        await self.engine.complete_received_items(batch["id"], [saved["id"]], False)
+        self.assertTrue(self.hass.data["shopping_list"].items[-1]["complete"])
+        self.transport.assert_awaited_once()  # Only the original mocked sandbox submission.
+
+    async def test_receipt_metadata_failure_is_retryable_without_another_purchase(self):
+        await self.configure_coffee()
+        await self.add_shopping_item("coffee")
+        batch = await self.prepare()
+        await self.submit(batch)
+        saved = self.coffee_orders()[0]
+        self.transport.return_value = {"id": "mock-zinc-id", "status": "order_placed", "items": [self.provider_item(saved)]}
+        await self.call("refresh_batch_zinc", {"batch_id": batch["id"]})
+        with patch.object(self.engine.store, "save", side_effect=OSError("disk full")):
+            with self.assertRaisesRegex(ValueError, "may already be complete"):
+                await self.engine.complete_received_items(batch["id"], [saved["id"]], True)
+        self.assertTrue(self.hass.data["shopping_list"].items[-1]["complete"])
+        report = await self.engine.complete_received_items(batch["id"], [saved["id"]], True)
+        self.assertEqual(report["results"][0]["status"], "already_complete")
+        self.assertEqual(self.transport.await_count, 2)
+
+    async def test_malformed_fulfillment_refresh_keeps_saved_status_and_details(self):
+        batch = await self.prepare()
+        await self.submit(batch)
+        before = deepcopy(self.engine.store.data)
+        self.transport.return_value = {"id": "mock-zinc-id", "status": "order_placed", "items": "invalid"}
+        with self.assertRaises(HomeAssistantError):
+            await self.call("refresh_batch_zinc", {"batch_id": batch["id"]})
+        self.assertEqual(self.engine.store.data, before)
+
+    async def test_successful_receipt_keeps_cooldown_but_allows_future_reorder(self):
+        from datetime import timedelta
+        from homeassistant.util import dt as dt_util
+        await self.configure_coffee()
+        await self.add_shopping_item("coffee")
+        batch = await self.prepare()
+        await self.submit(batch)
+        saved = self.coffee_orders()[0]
+        self.transport.return_value = {"id": "mock-zinc-id", "status": "order_placed", "items": [self.provider_item(saved)]}
+        await self.call("refresh_batch_zinc", {"batch_id": batch["id"]})
+        await self.engine.complete_received_items(batch["id"], [saved["id"]], True)
+        anchor = saved["shopping_list_completed_at"]
+        await self.add_shopping_item("coffee")
+        self.assertEqual(len(self.coffee_orders()), 1)
+        self.assertEqual(self.engine.intake_events[0]["reason"], "cooldown")
+        await self.engine.complete_received_items(batch["id"], [saved["id"]], True)
+        self.assertEqual(saved["shopping_list_completed_at"], anchor)
+        future = dt_util.utcnow() + timedelta(days=8)
+        with patch("custom_components.reorder.core.dt_util.utcnow", return_value=future):
+            await self.engine.match_new_item({"name": "coffee", "id": "fresh-future-item"})
+        self.assertEqual(len(self.coffee_orders()), 2)
+        self.assertEqual(sum(order["status"] == "queued" for order in self.coffee_orders()), 1)
+        self.assertEqual(self.transport.await_count, 2)
+
+    async def test_unknown_response_with_known_id_can_be_reconciled_by_refresh(self):
+        await self.configure_coffee()
+        await self.add_shopping_item("coffee")
+        batch = await self.prepare()
+        self.transport.return_value = {"id": "mock-zinc-id", "status": "pending", "items": "malformed"}
+        with self.assertRaises(HomeAssistantError):
+            await self.submit(batch)
+        self.assertEqual(self.engine.store.data["batches"][batch["id"]]["status"], "submission_unknown")
+        saved = self.coffee_orders()[0]
+        self.transport.return_value = {"id": "mock-zinc-id", "status": "order_placed", "items": [self.provider_item(saved)]}
+        await self.call("refresh_batch_zinc", {"batch_id": batch["id"]})
+        self.assertEqual(saved["zinc_order_id"], "mock-zinc-id")
+        await self.engine.complete_received_items(batch["id"], [saved["id"]], True)
+        self.assertTrue(self.hass.data["shopping_list"].items[-1]["complete"])
+        self.assertEqual(self.transport.await_count, 2)
+
+    async def test_receipt_confirmation_and_mode_mismatch_cannot_update_list(self):
+        from custom_components.reorder.frontend import websocket_receive_items
+        await self.configure_coffee()
+        await self.add_shopping_item("coffee")
+        batch = await self.prepare()
+        await self.submit(batch)
+        saved = self.coffee_orders()[0]
+        self.transport.return_value = {"id": "mock-zinc-id", "status": "order_placed", "items": [self.provider_item(saved)]}
+        await self.call("refresh_batch_zinc", {"batch_id": batch["id"]})
+        result = await self.admin_command(websocket_receive_items, batch_id=batch["id"], order_ids=[saved["id"]], confirmation="ITEMS RECEIVED")
+        result.send_error.assert_called_once()
+        self.hass.config_entries.async_update_entry(self.entry, options=self.options | {"zinc_api_key": "zn_live_not-a-real-key", "zinc_live_enabled": True})
+        result = await self.admin_command(websocket_receive_items, batch_id=batch["id"], order_ids=[saved["id"]], confirmation="ITEMS RECEIVED")
+        result.send_error.assert_called_once()
+        self.assertFalse(self.hass.data["shopping_list"].items[-1]["complete"])
+        self.assertEqual(self.transport.await_count, 2)
+
+    async def test_provider_delivery_does_not_clear_list_and_starts_repeat_cooldown(self):
+        await self.configure_coffee()
+        await self.add_shopping_item("coffee")
+        batch = await self.prepare()
+        await self.submit(batch)
+        saved = self.coffee_orders()[0]
+        self.transport.return_value = {"id": "mock-zinc-id", "status": "order_placed", "items": [self.provider_item(saved, "delivered")]}
+        await self.call("refresh_batch_zinc", {"batch_id": batch["id"]})
+        self.assertIn("delivery_confirmed_at", saved)
+        self.assertFalse(self.hass.data["shopping_list"].items[-1]["complete"])
+        await self.add_shopping_item("coffee")
+        self.assertEqual(len(self.coffee_orders()), 1)
+        self.assertEqual(self.engine.intake_events[0]["reason"], "cooldown")
+        self.assertEqual(self.transport.await_count, 2)
+
     async def test_missing_shipping_address_blocks_submission(self):
         batch = await self.prepare()
         self.hass.config_entries.async_update_entry(self.entry, options={"zinc_api_key": "zn_test_not-a-real-key"})
@@ -1360,3 +1590,30 @@ class DashboardConfigTest(unittest.TestCase):
         cancel = next(action for action in actions if action.get("target", {}).get("entity_id") == "button.reorder_cancel_batch")
         self.assertIn("confirmation", cancel)
         self.assertIn("queued orders", cancel["confirmation"]["text"])
+
+
+class FulfillmentDataTest(unittest.TestCase):
+    def test_duplicate_product_mapping_never_authorizes_list_completion(self):
+        from custom_components.reorder.fulfillment import fulfillment_snapshot, receipt_eligible
+        saved = order() | {"shopping_item_id": "source", "zinc_environment": "sandbox", "zinc_order_id": "mock"}
+        batch = {"status": "order_placed", "zinc_environment": "sandbox", "zinc_order_id": "mock", "fulfillment": fulfillment_snapshot({"items": [{"id": "provider", "url": saved["product_id"], "quantity": 2, "status": "ordered"}]})}
+        self.assertTrue(receipt_eligible(saved, batch, [saved]))
+        duplicate = saved | {"id": "another"}
+        self.assertFalse(receipt_eligible(saved, batch, [saved, duplicate]))
+        batch["fulfillment"]["items"].append(dict(batch["fulfillment"]["items"][0]))
+        self.assertFalse(receipt_eligible(saved, batch, [saved]))
+
+
+class ZincErrorPrivacyTest(unittest.IsolatedAsyncioTestCase):
+    async def test_http_errors_retain_only_machine_code_and_status(self):
+        from custom_components.reorder.zinc import ZincRequestError
+        response = MagicMock(status=422)
+        response.json = AsyncMock(return_value={"code": "invalid_shipping_address", "message": "zn_test_private at a private address", "shipping_address": {"first_name": "private"}})
+        session = MagicMock()
+        session.request.return_value.__aenter__.return_value = response
+        client = ZincClient(session, "zn_test_fake")
+        with self.assertRaises(ZincRequestError) as error:
+            await client.request("POST", "/orders", {})
+        self.assertEqual(error.exception.code, "invalid_shipping_address")
+        self.assertEqual(error.exception.status, 422)
+        self.assertNotIn("private", str(error.exception))

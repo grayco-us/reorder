@@ -1,4 +1,4 @@
-# Shopping List and configuration flows (v0.6.0)
+# Shopping List and configuration flows (v0.7.0)
 
 Reorder watches Home Assistant's built-in Shopping List. Adds and updates only create
 or change **local** work; they never submit a purchase. Synchronization is on by default
@@ -101,3 +101,12 @@ in-flight requests, failed saves, legacy options flows and admin-only management
 Frontend tests validate payloads, drafts and audit display; Chromium smoke tests cover
 product create/edit/disable/remove, schedule/preferences saving, validation errors and
 mobile rendering with synthetic local fixtures. No Zinc transactions are needed.
+
+## Order/receipt stage (v0.7.0)
+
+The new [ordering guide](ORDERING.md) adds sandbox-only UI submission and explicit
+per-line receipt/list completion. These are separate from source-change synchronization:
+placement and refresh never check off items automatically. Completion uses exact source
+IDs and skips renamed/missing lines; partial failures remain open. Provider delivery or
+an explicit recorded receipt permits a fresh request only after cooldown, while the old
+source ID and attempted submission remain protected against replay.

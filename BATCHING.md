@@ -1,4 +1,4 @@
-# Reorder v0.6.0 — Batch testing
+# Reorder v0.7.0 — Batch testing
 
 **Development preview. No scheduled payments.** A weekly/rolling schedule only creates a persistent batch marked `ready`.
 
@@ -202,3 +202,11 @@ cannot be submitted; unaffected lines return to queue and the old review stays i
 history. Submission rechecks linked list state, while in-flight/submitted requests
 remain untouched. Product and batch/list preference forms now live in the sidebar;
 credentials and delivery configuration remain native and are preserved by legacy saves.
+
+## Sandbox order and receipt controls (v0.7.0)
+
+The sidebar now supports explicitly confirmed sandbox submission, safe fulfillment/
+tracking details, and selected receipt/list completion. It does not expose live purchasing
+or automatically clear Shopping List items. Follow [ORDERING.md](ORDERING.md), starting
+with the success URL, then separate failure scenarios. Partial/mismatched lines are
+never guessed, and existing submission/idempotency/cooldown protections still apply.

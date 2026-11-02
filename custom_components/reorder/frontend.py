@@ -7,11 +7,14 @@ import voluptuous as vol
 from homeassistant.components import frontend, panel_custom, websocket_api
 from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntryState
-from homeassistant.core import callback
+from homeassistant.core import Context, callback
 from homeassistant.loader import async_get_integration
 
 from .batch import batch_status_label, preview, review_batch
 from .const import DOMAIN
+from .core import norm
+from .fulfillment import mapped_item, receipt_eligible
+from .shopping import shopping_items
 from .product_config import PRODUCT_SCHEMA, PREFERENCES_SCHEMA
 
 PANEL_PATH = "reorder-app"
@@ -30,11 +33,13 @@ def panel_data(engine, entry):
             "Not configured" if not key else "Invalid key")
     environment = "sandbox" if mode == "Sandbox" else "live" if mode == "Live enabled" else None
     batches = []
+    current_items = shopping_items(engine.hass)
+    current_by_id = {str(item["id"]): item for item in current_items or []}
     fields = ("id", "status", "created_at", "max_price", "zinc_environment",
-              "zinc_order_id", "last_refreshed_at", "canceled_at", "invalidated_at")
+              "zinc_order_id", "last_refreshed_at", "canceled_at", "invalidated_at", "fulfillment", "receipt_results", "submission_error_code")
     for batch in sorted(engine.store.data.get("batches", {}).values(),
                         key=lambda item: item["created_at"], reverse=True):
-        item = {field: batch[field] for field in fields if field in batch}
+        item = {field: deepcopy(batch[field]) for field in fields if field in batch}
         item["status_label"] = batch_status_label(batch["status"])
         try:
             report = review_batch(engine.store.data, batch["id"])
@@ -53,6 +58,25 @@ def panel_data(engine, entry):
                               and not batch.get("zinc_order_id") and not item["review_error"])
         item["can_refresh"] = bool(environment and batch.get("zinc_order_id")
                                     and batch.get("zinc_environment") == environment)
+        item["can_submit_sandbox"] = bool(mode == "Sandbox" and item["can_cancel"])
+        item["receivable_order_ids"] = []
+        raw_orders = [member for member in members if member is not None]
+        for order in item["orders"]:
+            original = engine.store.data["orders"].get(order["id"])
+            if original is None:
+                continue
+            provider = mapped_item(original, batch.get("fulfillment", {}), raw_orders)
+            order["provider_item"] = deepcopy(provider)
+            current = current_by_id.get(original.get("shopping_item_id"))
+            labels = {norm(original["name"]), norm(original.get("shopping_item_name", original["name"]))}
+            list_status = ("not_linked" if not original.get("shopping_item_id") else "unavailable" if current_items is None
+                           else "removed" if current is None else "renamed" if norm(current.get("name") or "") not in labels
+                           else "complete" if current.get("complete") else "pending")
+            order["shopping_list_status"] = list_status
+            if (environment == batch.get("zinc_environment") and list_status == "pending"
+                    and receipt_eligible(original, batch, raw_orders)):
+                item["receivable_order_ids"].append(order["id"])
+        item["item_mapping_incomplete"] = batch["status"] in ("order_placed", "order_failed", "failed") and any(order.get("provider_item") is None for order in item["orders"])
         batches.append(item)
     return {
         "mode": mode, "batches": batches, "queue": preview(engine.store.data),
@@ -153,6 +177,57 @@ def _manage_engine(hass, connection, msg):
     return engine
 
 
+@websocket_api.websocket_command({
+    vol.Required("type"): "reorder/sandbox_submit",
+    vol.Required("entry_id"): str,
+    vol.Required("batch_id"): str,
+    vol.Required("confirmation"): vol.In(["SANDBOX"]),
+})
+@websocket_api.async_response
+async def websocket_sandbox_submit(hass, connection, msg):
+    engine = _manage_engine(hass, connection, msg)
+    if engine is None:
+        return
+    entry = hass.config_entries.async_get_entry(msg["entry_id"])
+    if entry is None or not entry.options.get("zinc_api_key", "").startswith("zn_test_"):
+        connection.send_error(msg["id"], "sandbox_required", "This app only submits sandbox orders. Configure a zn_test_ key.")
+        return
+    result = await hass.services.async_call(DOMAIN, "submit_batch_zinc",
+        {"batch_id": msg["batch_id"], "confirmation": msg["confirmation"]}, blocking=True,
+        return_response=True, context=Context(user_id=getattr(connection.user, "id", None)))
+    connection.send_result(msg["id"], result)
+
+
+@websocket_api.websocket_command({
+    vol.Required("type"): "reorder/receive_items",
+    vol.Required("entry_id"): str,
+    vol.Required("batch_id"): str,
+    vol.Required("order_ids"): [str],
+    vol.Required("confirmation"): str,
+})
+@websocket_api.async_response
+async def websocket_receive_items(hass, connection, msg):
+    engine = _manage_engine(hass, connection, msg)
+    if engine is None:
+        return
+    entry = hass.config_entries.async_get_entry(msg["entry_id"])
+    key = entry.options.get("zinc_api_key", "") if entry else ""
+    simulation = key.startswith("zn_test_")
+    if not simulation and not (key.startswith("zn_live_") and entry.options.get("zinc_live_enabled", False)):
+        connection.send_error(msg["id"], "mode_required", "Configure the matching sandbox/live environment before updating list items")
+        return
+    if msg["confirmation"] != ("SIMULATE RECEIPT" if simulation else "ITEMS RECEIVED"):
+        connection.send_error(msg["id"], "confirmation_required", "Explicit receipt confirmation is required")
+        return
+    try:
+        result = await engine.complete_received_items(msg["batch_id"], msg["order_ids"], simulation,
+            context=Context(user_id=getattr(connection.user, "id", None)))
+    except ValueError as err:
+        connection.send_error(msg["id"], "invalid_receipt", str(err))
+        return
+    connection.send_result(msg["id"], result)
+
+
 async def async_setup_panel(hass, entry):
     """Register assets once, with a cache-busted, integration-owned sidebar panel."""
     if not hass.data.get(_STATIC_KEY):
@@ -161,7 +236,7 @@ async def async_setup_panel(hass, entry):
         ])
         hass.data[_STATIC_KEY] = True
     if not hass.data.get(_WS_KEY):
-        for handler in (websocket_panel, websocket_product_save, websocket_product_remove, websocket_preferences_save):
+        for handler in (websocket_panel, websocket_product_save, websocket_product_remove, websocket_preferences_save, websocket_sandbox_submit, websocket_receive_items):
             websocket_api.async_register_command(hass, handler)
         hass.data[_WS_KEY] = True
     if PANEL_PATH in hass.data.get(frontend.DATA_PANELS, {}):

@@ -1,4 +1,4 @@
-# Reorder sidebar app (v0.6.0)
+# Reorder sidebar app (v0.7.0)
 
 Reorder now bundles its own responsive frontend and automatically adds **Reorder**
 to Home Assistant's sidebar. There is no dashboard YAML to paste, no resource URL
@@ -49,9 +49,11 @@ retained. No batch migration or API-key re-entry is required.
 - **Reload:** Reads the currently saved Reorder state; it does not refresh Zinc orders.
 - **Connection:** Opens the existing Reorder integration configuration.
 
-There is no submit/purchase control in this release. Explicit sandbox/live submission
-still uses the existing actions and their confirmation requirements. The app adds no
-automatic retry, purchasing schedule, or retailer cancellation behavior.
+Ready sandbox batches now have a typed-confirmation submission control. The backend
+requires a test key independently of the browser. There is no live-purchase button;
+manual live actions retain their existing safeguards. See [the ordering guide](ORDERING.md)
+for item outcomes, tracking and explicit receipt/list updates. No automatic retry,
+purchasing schedule, carrier polling, or retailer cancellation behavior is added.
 
 Selection belongs to each browser panel, so two users/browsers can review different
 batches without changing one another's selection. It resets when the panel is recreated.
@@ -136,3 +138,11 @@ invalidate a prepared batch and return unaffected lines for fresh review. Submit
 purchases are never canceled by a list edit. The app shows **Needs fresh review** and
 the historical canceled/returned lines. Products and Settings are available as new
 app pages after deployment/restart and a browser refresh; no dashboard import is needed.
+
+## Order stage (v0.7.0)
+
+See [Sandbox ordering and receipt](ORDERING.md) for the full walkthrough. A ready batch
+in Sandbox mode can be submitted after a typed confirmation. Tracking, item failures,
+partial fulfillment and reported totals appear after refresh. Explicit selected receipt
+can check off exact linked list IDs; placement never implies delivery or automatic list
+cleanup. Missing/mismatched provider details disable automated list completion.

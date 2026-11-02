@@ -185,3 +185,54 @@ test("saving one settings page preserves an unrelated unsaved form draft", async
   assert.equal(view._productDraft.name, "Unsaved product");
   assert.equal(view._preferencesDraft, null);
 });
+
+
+test("sandbox submission needs typed confirmation and uses only the restricted gateway", async () => {
+  const view = panel(), calls = [];
+  view._confirmSubmit = "ready-batch";
+  view._hass.callWS = async message => { calls.push(message); return message.type === "reorder/panel" ? makePanelData() : {}; };
+  await view._submitSandbox();
+  assert.equal(calls.length, 0);
+  view._sandboxPhrase = "SANDBOX";
+  await view._submitSandbox();
+  assert.equal(calls[0].type, "reorder/sandbox_submit");
+  assert.equal(calls[0].confirmation, "SANDBOX");
+  assert.equal(calls.some(call => call.type === "call_service"), false);
+});
+
+test("live mode never acquires sandbox submission capability from client confirmation", async () => {
+  const view = panel();
+  view._data.mode = "Live enabled";
+  view._data.batches[0].can_submit_sandbox = false;
+  view._confirmSubmit = "ready-batch";
+  view._sandboxPhrase = "SANDBOX";
+  view._hass.callWS = () => { throw new Error("must not send"); };
+  await view._submitSandbox();
+  assert.doesNotMatch(view._orderControls(view._data.batches[0]), /data-open-submit/);
+});
+
+test("receipt confirmation requires selected eligible IDs and never changes provider status", async () => {
+  const view = panel(), calls = [];
+  const batch = view._data.batches[1];
+  batch.receivable_order_ids = [batch.orders[0].id];
+  view._confirmReceipt = batch.id;
+  view._receiptPhrase = "SIMULATE RECEIPT";
+  view._hass.callWS = async message => { calls.push(message); return message.type === "reorder/panel" ? view._data : { results: [{ order_id: batch.orders[0].id, status: "completed" }] }; };
+  await view._receiveItems();
+  assert.equal(calls.length, 0);
+  view._receiptOrderIds = [batch.orders[0].id];
+  await view._receiveItems();
+  assert.equal(calls[0].type, "reorder/receive_items");
+  assert.deepEqual(calls[0].order_ids, [batch.orders[0].id]);
+  assert.equal(batch.status, "order_placed");
+});
+
+test("tracking and partial failures are visible with escaped safe links and prices", () => {
+  const view = panel();
+  const html = view._fulfillment({ fulfillment: { outcome: "partial", error_code: "product_out_of_stock", prices_cents: { total: 1234 }, shipments: [{ carrier: "usps", tracking_number: "TEST<123>", status: "in_transit", url: "javascript:alert(1)", estimated_delivery_date: "2026-11-06" }] } });
+  assert.match(html, /Partial fulfillment/);
+  assert.match(html, /product_out_of_stock/);
+  assert.match(html, /\$12\.34/);
+  assert.match(html, /TEST&lt;123&gt;/);
+  assert.doesNotMatch(html, /href="javascript:/);
+});

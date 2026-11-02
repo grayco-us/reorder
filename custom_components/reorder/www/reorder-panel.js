@@ -33,6 +33,11 @@ export class ReorderPanel extends HTMLElement {
     this._error = "";
     this._notice = "";
     this._confirmCancel = null;
+    this._confirmSubmit = null;
+    this._sandboxPhrase = "";
+    this._confirmReceipt = null;
+    this._receiptPhrase = "";
+    this._receiptOrderIds = [];
     this._productDraft = null;
     this._originalProduct = null;
     this._removeProductName = null;
@@ -78,6 +83,11 @@ export class ReorderPanel extends HTMLElement {
       const data = await this._hass.callWS({ type: "reorder/panel", entry_id: this._entryId });
       if (generation !== this._generation || sequence !== this._loadSequence) return;
       this._data = data;
+      if (this._confirmSubmit && !data.batches.find(batch => batch.id === this._confirmSubmit)?.can_submit_sandbox) this._confirmSubmit = null;
+      if (this._confirmReceipt) {
+        const eligible = data.batches.find(batch => batch.id === this._confirmReceipt)?.receivable_order_ids || [];
+        this._receiptOrderIds = this._receiptOrderIds.filter(id => eligible.includes(id));
+      }
       if (this._selectedId && !data.batches.some(batch => batch.id === this._selectedId)) {
         this._selectedId = null;
         this._confirmCancel = null;
@@ -106,8 +116,9 @@ export class ReorderPanel extends HTMLElement {
     return `<div class="table-scroll"><table><thead><tr><th>Product</th><th class="quantity">Qty</th><th>Price ceiling</th></tr></thead><tbody>${orders.map(order => {
       const url = productURL(order.product_id);
       const name = url ? `<a href="${escapeHTML(url)}" target="_blank" rel="noopener noreferrer">${escapeHTML(order.name)}<svg class="external" aria-hidden="true" viewBox="0 0 24 24"><path d="M14 3h7v7M10 14 21 3M21 14v7H3V3h7"/></svg></a>` : escapeHTML(order.name);
-      const outcome = order.status === "returned_to_queue" ? "Returned to queue for fresh review" : order.status === "canceled" ? "Canceled locally" : "";
-      return `<tr><td>${name}${outcome ? `<small>${outcome}</small>` : ""}</td><td class="quantity">${escapeHTML(order.quantity)}</td><td>${this._money(order.max_price)}</td></tr>`;
+      const outcome = order.status === "returned_to_queue" ? "Returned to queue for fresh review" : order.status === "canceled" ? "Canceled locally" : order.provider_item ? `Provider: ${order.provider_item.status || "Unknown"}${order.provider_item.error_code ? " · " + order.provider_item.error_code : ""}` : "";
+      const list = order.shopping_list_status && order.shopping_list_status !== "not_linked" ? `<small>Shopping List: ${escapeHTML(order.shopping_list_status)}</small>` : "";
+      return `<tr><td>${name}${outcome ? `<small>${escapeHTML(outcome)}</small>` : ""}${list}</td><td class="quantity">${escapeHTML(order.quantity)}</td><td>${this._money(order.max_price)}</td></tr>`;
     }).join("")}</tbody></table></div>`;
   }
   _batchList() {
@@ -115,11 +126,25 @@ export class ReorderPanel extends HTMLElement {
     const batches = all.filter(batch => this._filter === "all" || (this._filter === "ready" ? batch.status === "ready" : batch.status !== "ready"));
     return `<aside class="card"><div class="card-head"><h3>Your batches</h3><div class="filters">${[["all", "All"], ["ready", "Ready"], ["history", "History"]].map(([key, name]) => `<button class="${key === this._filter ? "active" : ""}" data-filter="${key}" aria-pressed="${key === this._filter}">${name}</button>`).join("")}</div></div><div class="batch-list">${batches.length ? batches.map(batch => `<button class="batch ${batch.id === this._selectedId ? "selected" : ""}" data-batch="${escapeHTML(batch.id)}" aria-pressed="${batch.id === this._selectedId}"><strong>${escapeHTML(batch.status_label)}</strong><div class="row">${this._mode(batch.zinc_environment || "local")}<span class="price">${this._money(batch.max_price)}</span></div><small>${escapeHTML(batch.id)} · ${escapeHTML(this._date(batch.created_at))}</small></button>`).join("") : '<div class="empty"><h3>No batches here yet</h3><p>Prepare queued products to review them before ordering.</p></div>'}</div></aside>`;
   }
+  _fulfillment(batch) {
+    const details = batch.fulfillment || {};
+    const shipments = details.shipments || [];
+    const error = details.error_code || batch.submission_error_code;
+    return `${batch.item_mapping_incomplete ? '<div class="notice">Some saved lines do not match Zinc item details uniquely by URL and quantity. Refresh for details; unmatched lines cannot be completed automatically.</div>' : ""}${details.outcome === "partial" ? '<div class="notice error">Partial fulfillment: some lines failed or were skipped. Only explicitly successful selected test lines can be completed; no failed lines will be retried automatically.</div>' : ""}${details.outcome === "failed" ? '<div class="notice error">Reported lines failed, were skipped, or canceled. No list items will be completed or retried automatically.</div>' : ""}${error ? `<div class="notice error">Zinc error: ${escapeHTML(error)}. Review the order before taking further action.</div>` : ""}${Number.isInteger(details.prices_cents?.total) ? `<p><strong>Reported actual total: ${this._money(details.prices_cents.total / 100)}</strong></p>` : ""}${details.merchant_order_ids?.length ? `<p class="hint">Merchant order(s): ${details.merchant_order_ids.map(escapeHTML).join(", ")}</p>` : ""}<div class="editor"><h3>Tracking</h3>${shipments.length ? shipments.map(shipment => `<div class="notice"><strong>${escapeHTML(shipment.carrier || "Carrier not provided")}</strong> · ${escapeHTML(shipment.status || "Status not provided")}<p>${escapeHTML(shipment.tracking_number || "Tracking number pending")}</p>${shipment.estimated_delivery_date ? `<p class="hint">Estimated delivery: ${escapeHTML(shipment.estimated_delivery_date)}</p>` : ""}${productURL(shipment.url) ? `<a class="settings" href="${escapeHTML(productURL(shipment.url))}" target="_blank" rel="noopener noreferrer">Open public tracking ↗</a>` : ""}</div>`).join("") : '<p class="hint">No tracking supplied yet. Order placed does not mean delivered; refresh to retrieve updates.</p>'}</div>`;
+  }
+  _orderControls(batch) {
+    const submit = this._confirmSubmit === batch.id ? `<form class="notice confirm" data-form="sandbox_submit"><h3>Submit this sandbox batch?</h3><p>${batch.orders.length} saved product line(s), spending ceiling ${this._money(batch.max_price)}. This sends one simulated order to Zinc using the configured test key.</p>${this._field("Type SANDBOX to confirm", "confirmation", this._sandboxPhrase, { required: true })}<div class="actions" style="margin-top:12px"><button class="secondary" type="button" data-close-submit>Keep reviewing</button><button class="primary" type="submit" ${this._busy || this._sandboxPhrase !== "SANDBOX" ? "disabled" : ""}>Confirm sandbox submission</button></div></form>` : "";
+    const eligible = batch.receivable_order_ids || [];
+    const simulation = batch.zinc_environment === "sandbox";
+    const phrase = simulation ? "SIMULATE RECEIPT" : "ITEMS RECEIVED";
+    const receipt = this._confirmReceipt === batch.id ? `<form class="notice confirm" data-form="receipt"><h3>${simulation ? "Complete selected test list items" : "Complete delivered list items"}</h3><p>${simulation ? "Simulate receipt by checking off selected linked Shopping List items. This does not claim carrier delivery or make a purchase." : "Only provider-confirmed delivered lines are eligible. Confirm you received these items."} Renamed, removed, failed, and skipped lines stay untouched.</p>${batch.orders.filter(order => eligible.includes(order.id)).map(order => `<label style="display:block;margin:10px 0"><input type="checkbox" name="receipt_line" value="${escapeHTML(order.id)}" ${this._receiptOrderIds.includes(order.id) ? "checked" : ""}> ${escapeHTML(order.name)} · quantity ${escapeHTML(order.quantity)}</label>`).join("")}${this._field(`Type ${phrase} to confirm`, "confirmation", this._receiptPhrase, { required: true })}<div class="actions" style="margin-top:12px"><button class="secondary" type="button" data-close-receipt>Keep list unchanged</button><button class="primary" type="submit" ${this._busy || this._receiptPhrase !== phrase || !this._receiptOrderIds.length ? "disabled" : ""}>Confirm list update</button></div></form>` : "";
+    return `<div class="actions">${this._data.mode === "Sandbox" && batch.can_submit_sandbox ? `<button class="primary" data-open-submit="${escapeHTML(batch.id)}" ${this._busy ? "disabled" : ""}>Submit sandbox batch</button>` : ""}${eligible.length ? `<button class="secondary" data-open-receipt="${escapeHTML(batch.id)}" ${this._busy ? "disabled" : ""}>${simulation ? "Complete test list items" : "Complete delivered list items"}</button>` : ""}</div>${submit}${receipt}`;
+  }
   _details() {
     const batch = this._data.batches.find(item => item.id === this._selectedId);
     if (!batch) return '<section class="card empty"><h3>Choose a batch to review</h3><p>See saved products, quantities, spending limits, and status here.</p></section>';
     const confirmation = this._confirmCancel === batch.id ? `<div class="notice confirm" role="alert"><strong>Cancel this batch and its ${batch.orders.length} queued product line(s)?</strong><p>They stay in history and will not be queued again automatically. This does not cancel a retailer purchase.</p><div class="actions"><button class="secondary" data-keep>Keep batch</button><button class="primary" data-action="cancel_batch" data-id="${escapeHTML(batch.id)}" ${this._busy ? "disabled" : ""}>Confirm local cancellation</button></div></div>` : "";
-    return `<section class="card details"><div class="detail-top"><div><p class="eyebrow">Batch ${escapeHTML(batch.id)}</p><h3>${escapeHTML(batch.status_label)}</h3></div>${this._mode(batch.zinc_environment || "Not submitted")}</div><div class="meta"><span>Created ${escapeHTML(this._date(batch.created_at))}</span>${batch.last_refreshed_at ? `<span>Updated ${escapeHTML(this._date(batch.last_refreshed_at))}</span>` : ""}${batch.canceled_at ? `<span>Canceled ${escapeHTML(this._date(batch.canceled_at))}</span>` : ""}${batch.invalidated_at ? `<span>Invalidated ${escapeHTML(this._date(batch.invalidated_at))}</span>` : ""}</div><div class="actions"><button class="secondary" data-action="refresh_batch_zinc" data-id="${escapeHTML(batch.id)}" ${!batch.can_refresh || this._busy ? "disabled" : ""}>Refresh status</button><button class="secondary danger" data-cancel="${escapeHTML(batch.id)}" ${!batch.can_cancel || this._busy ? "disabled" : ""}>Cancel locally</button></div>${confirmation}${batch.status === "invalidated" ? '<div class="notice">The Shopping List changed. This batch cannot be submitted; unaffected lines returned to the queue. Prepare a new batch for review.</div>' : ""}${batch.review_error ? `<div class="notice error">${escapeHTML(batch.review_error)}</div>` : this._products(batch.orders)}<div class="total"><span>Total price ceiling</span><strong>${this._money(batch.max_price)}</strong></div><p class="hint">Spending limits, not a price quote. These are the products saved with this batch.</p>${batch.status === "submission_unknown" ? '<div class="notice error">The submission outcome is uncertain. Reconcile this order with Zinc before taking further action.</div>' : ""}${batch.zinc_order_id ? `<p class="hint">Zinc order ${escapeHTML(batch.zinc_order_id)}</p>` : ""}</section>`;
+    return `<section class="card details"><div class="detail-top"><div><p class="eyebrow">Batch ${escapeHTML(batch.id)}</p><h3>${escapeHTML(batch.status_label)}</h3></div>${this._mode(batch.zinc_environment || "Not submitted")}</div><div class="meta"><span>Created ${escapeHTML(this._date(batch.created_at))}</span>${batch.last_refreshed_at ? `<span>Updated ${escapeHTML(this._date(batch.last_refreshed_at))}</span>` : ""}${batch.canceled_at ? `<span>Canceled ${escapeHTML(this._date(batch.canceled_at))}</span>` : ""}${batch.invalidated_at ? `<span>Invalidated ${escapeHTML(this._date(batch.invalidated_at))}</span>` : ""}</div><div class="actions"><button class="secondary" data-action="refresh_batch_zinc" data-id="${escapeHTML(batch.id)}" ${!batch.can_refresh || this._busy ? "disabled" : ""}>Refresh status</button><button class="secondary danger" data-cancel="${escapeHTML(batch.id)}" ${!batch.can_cancel || this._busy ? "disabled" : ""}>Cancel locally</button></div>${confirmation}${this._orderControls(batch)}${batch.status === "invalidated" ? '<div class="notice">The Shopping List changed. This batch cannot be submitted; unaffected lines returned to the queue. Prepare a new batch for review.</div>' : ""}${batch.review_error ? `<div class="notice error">${escapeHTML(batch.review_error)}</div>` : this._products(batch.orders)}<div class="total"><span>Total price ceiling</span><strong>${this._money(batch.max_price)}</strong></div><p class="hint">Spending limits, not a price quote. These are the products saved with this batch.</p>${batch.status === "submission_unknown" ? '<div class="notice error">The submission outcome is uncertain. Reconcile this order with Zinc before taking further action.</div>' : ""}${batch.zinc_order_id ? `<p class="hint">Zinc order ${escapeHTML(batch.zinc_order_id)}</p>${this._fulfillment(batch)}` : batch.submission_error_code ? this._fulfillment(batch) : ""}</section>`;
   }
   _intake() {
     const labels = { queued: "Queued", no_match: "No catalog match", disabled: "Product disabled", ambiguous: "Ambiguous match", existing_order: "Existing order", cooldown: "Cooldown", already_seen: "Already processed", ignored: "Ignored", invalid_item: "Invalid item", storage_error: "Save failed", list_change: "List synchronized", submitted_unchanged: "Submitted order unchanged", sync_blocked: "Needs review", unchanged: "Same product", sync_disabled: "Manual synchronization", sync_unavailable: "List unavailable" };
@@ -149,6 +174,19 @@ export class ReorderPanel extends HTMLElement {
     const form = field.closest("form");
     if (!form || !field.name) return;
     const value = field.type === "checkbox" ? field.checked : field.value;
+    if (form.dataset.form === "sandbox_submit") {
+      this._sandboxPhrase = String(value);
+      form.querySelector('[type="submit"]').disabled = this._busy || this._sandboxPhrase !== "SANDBOX";
+      return;
+    }
+    if (form.dataset.form === "receipt") {
+      if (field.name === "receipt_line") this._receiptOrderIds = field.checked ? [...new Set([...this._receiptOrderIds, field.value])] : this._receiptOrderIds.filter(id => id !== field.value);
+      else this._receiptPhrase = String(value);
+      const batch = this._data.batches.find(item => item.id === this._confirmReceipt);
+      const phrase = batch?.zinc_environment === "sandbox" ? "SIMULATE RECEIPT" : "ITEMS RECEIVED";
+      form.querySelector('[type="submit"]').disabled = this._busy || this._receiptPhrase !== phrase || !this._receiptOrderIds.length;
+      return;
+    }
     if (form.dataset.form === "product" && this._productDraft) this._productDraft[field.name] = value;
     if (form.dataset.form === "preferences") {
       this._preferencesDraft ||= { strategy: "manual", weekday: 6, hour: 10, rolling_hours: 48, sync_shopping_list: true, ...this._data.preferences };
@@ -158,6 +196,8 @@ export class ReorderPanel extends HTMLElement {
   _submit(event) {
     event.preventDefault();
     if (this._busy) return;
+    if (event.target.dataset.form === "sandbox_submit") { this._submitSandbox(); return; }
+    if (event.target.dataset.form === "receipt") { this._receiveItems(); return; }
     if (event.target.dataset.form === "product") {
       const draft = this._productDraft;
       this._manage("reorder/product_save", { product: {
@@ -173,6 +213,43 @@ export class ReorderPanel extends HTMLElement {
         rolling_hours: Number(settings.rolling_hours), sync_shopping_list: settings.sync_shopping_list,
       } }, "Preferences saved. No purchase was made.");
     }
+  }
+  async _submitSandbox() {
+    const batch = this._data?.batches.find(item => item.id === this._confirmSubmit);
+    if (this._busy || this._data.mode !== "Sandbox" || this._sandboxPhrase !== "SANDBOX" || !batch?.can_submit_sandbox) return;
+    this._busy = true;
+    this._error = "";
+    this._notice = "";
+    this._render();
+    try {
+      await this._hass.callWS({ type: "reorder/sandbox_submit", entry_id: this._entryId, batch_id: batch.id, confirmation: "SANDBOX" });
+      this._notice = "Sandbox submission accepted. Refresh status to follow processing; no real purchase was made.";
+    } catch (error) { this._error = error.message || "Submission outcome may be uncertain. Refresh/reconcile with Zinc; do not submit again blindly."; }
+    finally {
+      this._confirmSubmit = null;
+      this._sandboxPhrase = "";
+      await this._load();
+      this._busy = false;
+      this._render();
+    }
+  }
+  async _receiveItems() {
+    const batch = this._data?.batches.find(item => item.id === this._confirmReceipt);
+    const phrase = batch?.zinc_environment === "sandbox" ? "SIMULATE RECEIPT" : "ITEMS RECEIVED";
+    const ids = [...this._receiptOrderIds];
+    if (this._busy || !batch || this._receiptPhrase !== phrase || !ids.length || ids.some(id => !(batch.receivable_order_ids || []).includes(id))) return;
+    this._busy = true;
+    this._error = "";
+    this._render();
+    try {
+      const result = await this._hass.callWS({ type: "reorder/receive_items", entry_id: this._entryId, batch_id: batch.id, order_ids: ids, confirmation: phrase });
+      const count = result.results.filter(item => ["completed", "already_complete"].includes(item.status)).length;
+      this._notice = `${count} selected list item(s) complete; ${result.results.length - count} skipped or failed. Provider delivery status was not changed.`;
+      this._confirmReceipt = null;
+      this._receiptOrderIds = [];
+      this._receiptPhrase = "";
+    } catch (error) { this._error = error.message || "List update failed. Reload to check which items are already complete before retrying."; }
+    finally { await this._load(); this._busy = false; this._render(); }
   }
   async _manage(type, data, notice) {
     if (this._busy || !["reorder/product_save", "reorder/product_remove", "reorder/preferences_save"].includes(type)) return;
@@ -192,7 +269,7 @@ export class ReorderPanel extends HTMLElement {
   }
   _render() {
     const data = this._data;
-    this.shadowRoot.innerHTML = `<style>${css}</style><header><button class="menu" data-menu aria-label="Open Home Assistant menu">☰</button><h1>Reorder</h1><span class="grow"></span>${data ? this._mode(data.mode) : ""}<a class="settings" href="/config/integrations/integration/reorder">Connection</a></header><main><div class="top"><div><h2>Batches & orders</h2><p>Review your batches and track order progress.</p></div><button class="secondary" data-reload ${this._busy ? "disabled" : ""}>Reload</button></div>${this._error ? `<div class="notice error" role="alert">${escapeHTML(this._error)}</div>` : ""}${this._notice ? `<div class="notice" role="status">${escapeHTML(this._notice)}</div>` : ""}${data ? `<nav class="tabs" aria-label="Reorder sections"><button class="tab ${this._tab === "batches" ? "active" : ""}" data-tab="batches">Batches<span class="count">${data.batches.length}</span></button><button class="tab ${this._tab === "queue" ? "active" : ""}" data-tab="queue">Queue<span class="count">${data.queue.count}</span></button><button class="tab ${this._tab === "products" ? "active" : ""}" data-tab="products">Products</button><button class="tab ${this._tab === "settings" ? "active" : ""}" data-tab="settings">Settings</button></nav>${this._tab === "queue" ? this._queue() : this._tab === "products" ? this._productsPage() : this._tab === "settings" ? this._settingsPage() : `<div class="layout">${this._batchList()}${this._details()}</div>`}<p class="footer">${data.batches.filter(batch => batch.status === "ready").length} ready for review · ${data.product_count} enabled catalog product(s) · No purchases can be submitted from this app.</p>` : '<div class="card loading" role="status">Loading Reorder…</div>'}</main>`;
+    this.shadowRoot.innerHTML = `<style>${css}</style><header><button class="menu" data-menu aria-label="Open Home Assistant menu">☰</button><h1>Reorder</h1><span class="grow"></span>${data ? this._mode(data.mode) : ""}<a class="settings" href="/config/integrations/integration/reorder">Connection</a></header><main><div class="top"><div><h2>Batches & orders</h2><p>Review your batches and track order progress.</p></div><button class="secondary" data-reload ${this._busy ? "disabled" : ""}>Reload</button></div>${this._error ? `<div class="notice error" role="alert">${escapeHTML(this._error)}</div>` : ""}${this._notice ? `<div class="notice" role="status">${escapeHTML(this._notice)}</div>` : ""}${data ? `<nav class="tabs" aria-label="Reorder sections"><button class="tab ${this._tab === "batches" ? "active" : ""}" data-tab="batches">Batches<span class="count">${data.batches.length}</span></button><button class="tab ${this._tab === "queue" ? "active" : ""}" data-tab="queue">Queue<span class="count">${data.queue.count}</span></button><button class="tab ${this._tab === "products" ? "active" : ""}" data-tab="products">Products</button><button class="tab ${this._tab === "settings" ? "active" : ""}" data-tab="settings">Settings</button></nav>${this._tab === "queue" ? this._queue() : this._tab === "products" ? this._productsPage() : this._tab === "settings" ? this._settingsPage() : `<div class="layout">${this._batchList()}${this._details()}</div>`}<p class="footer">${data.batches.filter(batch => batch.status === "ready").length} ready for review · ${data.product_count} enabled catalog product(s) · Sandbox ordering requires confirmation. Live purchasing stays outside this app.</p>` : '<div class="card loading" role="status">Loading Reorder…</div>'}</main>`;
   }
   _click(event) {
     const button = event.target.closest("button");
@@ -204,7 +281,7 @@ export class ReorderPanel extends HTMLElement {
       return;
     }
     if ("reload" in data) { this._error = ""; this._load(); return; }
-    if (data.tab) { this._tab = data.tab; this._confirmCancel = null; this._removeProductName = null; this._error = ""; this._notice = ""; }
+    if (data.tab) { this._tab = data.tab; this._confirmCancel = null; this._confirmSubmit = null; this._confirmReceipt = null; this._removeProductName = null; this._error = ""; this._notice = ""; }
     if ("newProduct" in data) {
       this._originalProduct = null;
       this._productDraft = { name: "", aliases: "", retailer: "zinc", product_id: "", quantity: 1, max_price: 50, cooldown_hours: 168, enabled: true, substitute_1: "", substitute_2: "", can_rename: true };
@@ -228,7 +305,11 @@ export class ReorderPanel extends HTMLElement {
       return;
     }
     if (data.filter) { this._filter = data.filter; }
-    if (data.batch) { this._selectedId = data.batch; this._confirmCancel = null; }
+    if (data.batch) { this._selectedId = data.batch; this._confirmCancel = null; this._confirmSubmit = null; this._confirmReceipt = null; }
+    if (data.openSubmit) { this._confirmSubmit = data.openSubmit; this._sandboxPhrase = ""; }
+    if ("closeSubmit" in data) this._confirmSubmit = null;
+    if (data.openReceipt) { this._confirmReceipt = data.openReceipt; this._receiptPhrase = ""; this._receiptOrderIds = []; }
+    if ("closeReceipt" in data) this._confirmReceipt = null;
     if (data.cancel) { this._confirmCancel = data.cancel; }
     if ("keep" in data) { this._confirmCancel = null; }
     if (data.action) { this._action(data.action, data.id); return; }

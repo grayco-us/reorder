@@ -7,8 +7,9 @@ from uuid import uuid4
 from urllib.parse import urlparse
 from homeassistant.core import callback
 from homeassistant.util import dt as dt_util
+from .fulfillment import fulfillment_snapshot, mapped_item, receipt_eligible, safe_code
 from .batch import review_batch
-from .shopping import shopping_items
+from .shopping import shopping_items, shopping_entity_for_item
 from .notifications import async_notify
 from .product_config import PREFERENCES_SCHEMA, product_values
 from .const import ACTIVE_PURCHASE_STATUSES, EVENT_UPDATED
@@ -125,6 +126,22 @@ class ReorderEngine:
         del self.intake_events[20:]
         self.publish()
         return event
+
+    @staticmethod
+    def _receipt_recorded(order):
+        return bool(order.get("delivery_confirmed_at") or (order.get("shopping_list_completed_at") and order.get("receipt_mode") in ("sandbox_simulation", "delivered_item")))
+
+    def _active_purchase(self, order):
+        return (order["status"] in ACTIVE_PURCHASE_STATUSES
+                and not (order["status"] == "order_placed" and self._receipt_recorded(order)))
+
+    def _purchase_blocker(self, previous, requesting):
+        if self._active_purchase(previous):
+            return True
+        if self._receipt_recorded(previous):
+            hours = requesting.get("cooldown_hours", self.store.data["products"].get(requesting["product_key"], {}).get("cooldown_hours", 168))
+            return previous.get("delivery_confirmed_at", previous.get("shopping_list_completed_at")) >= (dt_util.utcnow() - timedelta(hours=hours)).isoformat()
+        return False
 
     def _shopping_sync_enabled(self):
         return self.store.data.get("preferences", {}).get("sync_shopping_list", True)
@@ -325,13 +342,12 @@ class ReorderEngine:
             now = dt_util.utcnow()
             prior = [order for order in self.store.data["orders"].values()
                      if order["product_key"] == norm(product["name"])]
-            active = next((order for order in prior if order["status"] in
-                           ({"queued", "approved"} | ACTIVE_PURCHASE_STATUSES)), None)
+            active = next((order for order in prior if order["status"] in ("queued", "approved") or self._active_purchase(order)), None)
             if active:
                 return self._record_intake(item, "existing_order", f"Existing order {active['id']} has status {active['status']}. Review it before creating another.", active["id"])
             cutoff = now - timedelta(hours=product["cooldown_hours"])
             # A never-submitted local cancellation must not start a purchase cooldown.
-            recent = next((order for order in prior if order["created_at"] >= cutoff.isoformat()
+            recent = next((order for order in prior if order.get("delivery_confirmed_at", order.get("shopping_list_completed_at", order.get("submitted_at", order["created_at"]))) >= cutoff.isoformat()
                            and not (order["status"] == "canceled" and "zinc_environment" not in order
                                     and not order.get("zinc_order_id"))), None)
             if recent:
@@ -343,7 +359,7 @@ class ReorderEngine:
                 "product_id": product["product_id"], "quantity": product["quantity"],
                 "max_price": product["max_price"], "status": "queued",
                 "substitutes": list(product.get("substitutes", [])), "substitution_index": 0,
-                "shopping_item_id": item_id, "shopping_item_name": item["name"], "created_at": now.isoformat(),
+                "shopping_item_id": item_id, "shopping_item_name": item["name"], "created_at": now.isoformat(), "cooldown_hours": product["cooldown_hours"],
                 "note": "Queued locally; no retailer API was called.",
             }
             previous_seen = list(self.store.data["seen_items"])
@@ -424,10 +440,11 @@ class ReorderEngine:
                 raise ValueError("Order is not assigned to Zinc")
             if not order["product_id"].startswith("https://"):
                 raise ValueError("Zinc requires a full HTTPS product URL")
-            if any(o["product_key"] == order["product_key"] and o["status"] in ACTIVE_PURCHASE_STATUSES for o in self.store.data["orders"].values() if o["id"] != order_id):
+            if any(o["product_key"] == order["product_key"] and self._purchase_blocker(o, order) for o in self.store.data["orders"].values() if o["id"] != order_id):
                 raise ValueError("Another order for this product is already active")
             self._check_shopping_items_before_submission([order])
             order["status"] = "submitting"
+            order["submitted_at"] = dt_util.utcnow().isoformat()
             order["note"] = "Submission started; do not retry blindly if the connection fails."
             order["zinc_environment"] = "sandbox" if sandbox else "live"
             await self.store.save()
@@ -486,24 +503,32 @@ class ReorderEngine:
                 raise ValueError("Batch must contain 1–10 distinct catalog products")
             product_keys = {o["product_key"] for o in orders}
             if any(o["product_key"] in product_keys and o["id"] not in batch["order_ids"]
-                   and o["status"] in ACTIVE_PURCHASE_STATUSES
+                   and any(self._purchase_blocker(o, member) for member in orders if member["product_key"] == o["product_key"])
                    for o in self.store.data["orders"].values()):
                 raise ValueError("Another order for a batch product is active or uncertain")
             self._check_shopping_items_before_submission(orders)
             batch["status"] = "submitting"
+            batch["submitted_at"] = dt_util.utcnow().isoformat()
             batch["zinc_environment"] = "sandbox" if sandbox else "live"
             for order in orders:
                 order["status"] = "submitting"
+                order["submitted_at"] = batch["submitted_at"]
                 order["zinc_environment"] = batch["zinc_environment"]
             await self.store.save()
         self.publish()
+        response = None
         try:
             response = await client.create_batch_order(batch, orders, address)
             if not isinstance(response, dict) or not (response.get("id") or response.get("order_id")):
                 raise ValueError("Zinc response missing order ID; reconcile before retrying")
-        except Exception:
+            details = fulfillment_snapshot(response)
+        except Exception as err:
             async with self.lock:
                 batch["status"] = "submission_unknown"
+                if isinstance(response, dict) and isinstance(response.get("id"), str):
+                    batch["zinc_order_id"] = response["id"]
+                if safe_code(getattr(err, "code", None)):
+                    batch["submission_error_code"] = safe_code(err.code)
                 batch["note"] = "Reconcile with Zinc before retrying. Never resubmit blindly."
                 for order in orders:
                     order["status"] = "submission_unknown"
@@ -511,6 +536,7 @@ class ReorderEngine:
             self.publish()
             raise
         async with self.lock:
+            batch["fulfillment"] = details
             batch["zinc_order_id"] = response.get("id") or response.get("order_id")
             batch["status"] = response.get("status", "submitted")
             batch["note"] = "Zinc accepted batch request; fulfillment may still be pending."
@@ -536,12 +562,102 @@ class ReorderEngine:
             raise ValueError("Zinc refresh returned a different order ID; saved batch unchanged")
         status = result["status"]
         async with self.lock:
+            details = fulfillment_snapshot(result, batch.get("fulfillment"))
+            previous_batch = deepcopy(batch)
+            previous_orders = {key: deepcopy(self.store.data["orders"][key]) for key in batch["order_ids"]}
+            batch["fulfillment"] = details
             batch["status"] = status
             batch["note"] = "Refreshed with Zinc; inspect retailer status for partial failures."
             batch["last_refreshed_at"] = dt_util.utcnow().isoformat()
-            for item_id in batch["order_ids"]:
-                self.store.data["orders"][item_id]["status"] = status
-            await self.store.save()
-            report = dict(batch)
+            members = [self.store.data["orders"][key] for key in batch["order_ids"]]
+            for member in members:
+                member["status"] = status
+                member["zinc_order_id"] = zinc_id
+                member["zinc_environment"] = batch["zinc_environment"]
+                provider = mapped_item(member, details, members)
+                if provider and provider["status"] == "delivered" and not provider.get("error_code"):
+                    member.setdefault("delivery_confirmed_at", dt_util.utcnow().isoformat())
+            try:
+                await self.store.save()
+            except Exception:
+                batch.clear()
+                batch.update(previous_batch)
+                for key, previous in previous_orders.items():
+                    self.store.data["orders"][key].clear()
+                    self.store.data["orders"][key].update(previous)
+                raise
+            report = deepcopy(batch)
         self.publish()
         return report
+
+    async def complete_received_items(self, batch_id, order_ids, simulation, context=None):
+        """Explicit, per-line list completion only; never change provider fulfillment."""
+        if not order_ids or len(order_ids) != len(set(order_ids)) or len(order_ids) > 10:
+            raise ValueError("Select 1–10 distinct order lines")
+        async with self.shopping_lock:
+            async with self.lock:
+                batch = self.store.data.get("batches", {}).get(batch_id)
+                expected = "sandbox" if simulation else "live"
+                if not batch or batch.get("zinc_environment") != expected:
+                    raise ValueError("Batch environment does not match receipt mode")
+                orders = [self.store.data["orders"][key] for key in batch["order_ids"]]
+                selected = [self.store.data["orders"].get(key) for key in order_ids]
+                if any(order is None or order["id"] not in batch["order_ids"]
+                       or not receipt_eligible(order, batch, orders) for order in selected):
+                    raise ValueError("A selected line is not confirmed successful/delivered, or its product mapping is ambiguous")
+            results = []
+            for order in selected:
+                items = shopping_items(self.hass)
+                current = next((item for item in items or [] if str(item["id"]) == order["shopping_item_id"]), None)
+                result = {"order_id": order["id"], "status": "skipped_missing"}
+                if items is None:
+                    result["status"] = "source_unavailable"
+                elif current is not None:
+                    labels = {norm(order["name"]), norm(order.get("shopping_item_name", order["name"]))}
+                    if norm(current.get("name") or "") not in labels:
+                        result["status"] = "skipped_renamed"
+                    elif current.get("complete"):
+                        result["status"] = "already_complete"
+                    else:
+                        entity_id = shopping_entity_for_item(self.hass, order["shopping_item_id"])
+                        if entity_id is None:
+                            result["status"] = "source_unavailable"
+                        else:
+                            try:
+                                await self.hass.services.async_call("todo", "update_item",
+                                    {"item": order["shopping_item_id"], "status": "completed"},
+                                    target={"entity_id": entity_id}, blocking=True, context=context)
+                                result["status"] = "completed"
+                            except Exception:
+                                # Do not retain arbitrary integration error text or list payloads.
+                                result["status"] = "list_update_failed"
+                results.append(result)
+            async with self.lock:
+                previous = deepcopy(batch.get("receipt_results"))
+                previous_meta = {order["id"]: {key: order.get(key) for key in ("shopping_list_completed_at", "receipt_mode")} for order in selected}
+                now = dt_util.utcnow().isoformat()
+                merged = dict(batch.get("receipt_results", {}))
+                for result in results:
+                    merged[result["order_id"]] = {**result, "updated_at": now,
+                        "mode": "sandbox_simulation" if simulation else "delivered_item"}
+                    if result["status"] in ("completed", "already_complete"):
+                        completed = self.store.data["orders"][result["order_id"]]
+                        completed.setdefault("shopping_list_completed_at", now)
+                        completed["receipt_mode"] = "sandbox_simulation" if simulation else "delivered_item"
+                batch["receipt_results"] = merged
+                try:
+                    await self.store.save()
+                except Exception as err:
+                    if previous is None:
+                        batch.pop("receipt_results", None)
+                    else:
+                        batch["receipt_results"] = previous
+                    for order in selected:
+                        for key, value in previous_meta[order["id"]].items():
+                            if value is None:
+                                order.pop(key, None)
+                            else:
+                                order[key] = value
+                    raise ValueError("Shopping List items may already be complete, but receipt metadata could not be saved. Reload before retrying; no purchase was submitted.") from err
+            self.publish()
+            return {"batch_id": batch_id, "simulation": simulation, "results": results}

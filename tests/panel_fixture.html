@@ -12,6 +12,20 @@ panel.hass = {
   async callWS(message) {
     window.reorderCalls.push(message);
     if (message.type === 'reorder/panel') return structuredClone(window.snapshot);
+    if (message.type === 'reorder/sandbox_submit') {
+      const batch = window.snapshot.batches.find(item => item.id === message.batch_id);
+      if (window.snapshot.mode !== 'Sandbox' || message.confirmation !== 'SANDBOX' || !batch?.can_submit_sandbox) throw { message: 'Sandbox confirmation required' };
+      Object.assign(batch, { status: 'pending', status_label: 'Pending', zinc_environment: 'sandbox', zinc_order_id: 'mock-submitted-id', can_submit_sandbox: false, can_cancel: false, can_refresh: true });
+      for (const order of batch.orders) order.shopping_list_status = 'pending';
+      return { id: batch.id, status: batch.status };
+    }
+    if (message.type === 'reorder/receive_items') {
+      const batch = window.snapshot.batches.find(item => item.id === message.batch_id);
+      if (message.confirmation !== 'SIMULATE RECEIPT' || message.order_ids.some(id => !batch.receivable_order_ids.includes(id))) throw { message: 'Receipt confirmation required' };
+      for (const order of batch.orders) if (message.order_ids.includes(order.id)) order.shopping_list_status = 'complete';
+      batch.receivable_order_ids = batch.receivable_order_ids.filter(id => !message.order_ids.includes(id));
+      return { results: message.order_ids.map(order_id => ({ order_id, status: 'completed' })), simulation: true };
+    }
     if (message.type === 'reorder/product_save') {
       const index = window.snapshot.catalog.findIndex(product => product.name === message.original_name);
       if (!message.product.product_id.startsWith('https://')) throw { message: 'Zinc requires HTTPS' };
@@ -37,9 +51,15 @@ panel.hass = {
       Object.assign(batch, { status: 'canceled', status_label: 'Canceled', can_cancel: false, canceled_at: '2026-11-02T14:00:00Z' });
     } else if (message.service === 'refresh_batch_zinc') {
       if (!batch?.can_refresh) throw { message: 'Refresh is not allowed' };
-      batch.last_refreshed_at = '2026-11-02T14:00:00Z';
+      Object.assign(batch, { last_refreshed_at: '2026-11-02T14:00:00Z', status: 'order_placed', status_label: 'Order placed' });
+      for (const order of batch.orders) {
+        order.provider_item = { id: 'provider-' + order.id, url: order.product_id, quantity: order.quantity, status: 'ordered', error_code: null };
+        order.shopping_list_status ||= 'pending';
+      }
+      batch.fulfillment = { items: batch.orders.map(order => order.provider_item), outcome: 'processing_or_success', prices_cents: { total: Math.round(batch.max_price * 90) }, shipments: [{ carrier: 'usps', tracking_number: 'TEST123', status: 'in_transit', url: 'https://www.17track.net/test', estimated_delivery_date: '2026-11-06' }] };
+      batch.receivable_order_ids = batch.orders.filter(order => order.shopping_list_status === 'pending').map(order => order.id);
     } else if (message.service === 'prepare_batch') {
-      const newBatch = { id: 'prepared-in-app', status: 'ready', status_label: 'Ready for review', created_at: '2026-11-02T14:00:00Z', max_price: window.snapshot.queue.price_ceiling, can_cancel: true, can_refresh: false, review_error: null, orders: structuredClone(window.snapshot.queue.orders) };
+      const newBatch = { id: 'prepared-in-app', status: 'ready', status_label: 'Ready for review', created_at: '2026-11-02T14:00:00Z', max_price: window.snapshot.queue.price_ceiling, can_cancel: true, can_refresh: false, can_submit_sandbox: true, receivable_order_ids: [], review_error: null, orders: structuredClone(window.snapshot.queue.orders) };
       window.snapshot.batches.unshift(newBatch);
       window.snapshot.queue = { count: 0, orders: [], price_ceiling: 0 };
       return { response: newBatch };
