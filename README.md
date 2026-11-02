@@ -2,6 +2,20 @@
 
 Home Assistant custom integration for routing exact, preapproved shopping-list items to a persistent order queue, with **Zinc API submission (sandbox first)**.
 
+## v0.4.3: Review and cancel prepared batches
+
+Use `reorder.review_batch` with a batch ID to display its saved product names, URLs,
+quantities, individual price ceilings, total ceiling, and current local status. It
+never contacts Zinc. Catalog edits do not change the queued product snapshots being
+reviewed. The action also supports an optional response for scripts.
+
+`reorder.cancel_batch` cancels a locally prepared `ready` batch **and its queued
+orders**. Canceled orders stay in history, are not returned to the queue, and cannot
+be purchased or automatically batched again. Repeating the cancellation is safe.
+This does not cancel a retailer purchase: any submitted or uncertain batch must be
+reconciled with Zinc. Cancellation is saved before notification, with in-memory
+rollback on storage failure. Configuration and existing storage remain compatible.
+
 ## v0.4.2: Visible submission and refresh results
 
 `reorder.submit_batch_zinc` and `reorder.refresh_batch_zinc` now show the batch ID,

@@ -1,7 +1,7 @@
 """Persistent, review-first batch planning. Never triggers a payment automatically."""
+from copy import deepcopy
 from datetime import timedelta
 from uuid import uuid4
-from urllib.parse import urlparse
 from homeassistant.util import dt as dt_util
 
 ACTIVE = {"queued", "approved"}
@@ -50,6 +50,63 @@ async def create_batch(engine, retailer="zinc", max_items=10):
             raise
     engine.publish()
     return batch
+
+
+def review_batch(data, batch_id):
+    """Return saved product snapshots without consulting the mutable catalog."""
+    batch = data.get("batches", {}).get(batch_id)
+    if batch is None:
+        raise ValueError("Batch not found")
+    orders = []
+    for order_id in batch["order_ids"]:
+        order = data["orders"].get(order_id)
+        if order is None or order.get("batch_id") != batch_id:
+            raise ValueError("Batch contains a missing or reassigned order")
+        orders.append({key: order[key] for key in (
+            "id", "name", "product_id", "quantity", "max_price", "status"
+        )})
+    return deepcopy({**batch, "orders": orders, "count": len(orders)})
+
+
+async def cancel_batch(engine, batch_id):
+    """Cancel only local, unsubmitted work; never attempt a retailer cancellation."""
+    async with engine.lock:
+        batch = engine.store.data.get("batches", {}).get(batch_id)
+        if batch is None:
+            raise ValueError("Batch not found")
+        if "zinc_environment" in batch or batch.get("zinc_order_id"):
+            raise ValueError("Submitted or uncertain batches must be reconciled with Zinc")
+        if batch["status"] == "canceled" and batch.get("canceled_at"):
+            return review_batch(engine.store.data, batch_id)
+        if batch["status"] != "ready":
+            raise ValueError("Only an unsubmitted ready batch can be canceled locally")
+        orders = [engine.store.data["orders"].get(key) for key in batch["order_ids"]]
+        if not orders or any(
+            order is None or order.get("batch_id") != batch_id
+            or order["status"] not in ACTIVE or "zinc_environment" in order
+            or order.get("zinc_order_id") for order in orders
+        ):
+            raise ValueError("Batch contains an invalid, changed, or attempted order")
+        previous_batch = deepcopy(batch)
+        previous_orders = [deepcopy(order) for order in orders]
+        batch.update(
+            status="canceled", canceled_at=dt_util.utcnow().isoformat(),
+            note="Batch and its queued orders canceled locally. Nothing was sent to Zinc.",
+        )
+        for order in orders:
+            order.update(status="canceled", note="Canceled with its unsubmitted batch; no purchase was made.")
+        try:
+            await engine.store.save()
+        except Exception:
+            batch.clear()
+            batch.update(previous_batch)
+            for order, previous in zip(orders, previous_orders, strict=True):
+                order.clear()
+                order.update(previous)
+            raise
+        report = review_batch(engine.store.data, batch_id)
+    engine.publish()
+    return report
 
 def scheduled_due(data, now, timezone):
     settings = data.get("batch_settings", {})

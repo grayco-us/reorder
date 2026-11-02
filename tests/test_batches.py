@@ -405,6 +405,142 @@ class BatchActionsTest(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(HomeAssistantError, "confirmed out of stock"):
             await self.call("queue_next_substitution", {"order_id": "1"})
 
+    async def test_review_uses_saved_products_without_mutating_storage(self):
+        batch = await self.prepare()
+        self.engine.store.data["products"]["product 1"] = {"name": "Edited catalog", "quantity": 9}
+        before = deepcopy(self.engine.store.data)
+        report = await self.call("review_batch", {"batch_id": batch["id"]}, response=True)
+        self.assertEqual(report["orders"][0]["name"], "Product 1")
+        self.assertEqual(report["orders"][0]["quantity"], 2)
+        self.assertEqual(report["orders"][0]["product_id"], order()["product_id"])
+        self.assertEqual(self.engine.store.data, before)
+        report["order_ids"].clear()
+        report["orders"][0]["quantity"] = 99
+        self.assertEqual(self.engine.store.data, before)
+        notification = self.hass.data["persistent_notification"][f"reorder_batch_{batch['id']}"]
+        self.assertIn("quantity 2", notification["message"])
+        self.assertEqual(notification["title"], "Reorder — Batch Review")
+        self.transport.assert_not_awaited()
+
+    async def test_review_submitted_batch_does_not_contact_zinc(self):
+        batch = await self.prepare()
+        await self.submit(batch)
+        self.transport.reset_mock()
+        await self.call("review_batch", {"batch_id": batch["id"]})
+        self.transport.assert_not_awaited()
+
+    async def test_unknown_batch_actions_report_error_without_changes(self):
+        before = deepcopy(self.engine.store.data)
+        for action in ("review_batch", "cancel_batch"):
+            with self.assertRaisesRegex(HomeAssistantError, "Batch not found"):
+                await self.call(action, {"batch_id": "missing"})
+        self.assertEqual(self.engine.store.data, before)
+        self.transport.assert_not_awaited()
+
+    async def test_cancel_persists_batch_and_order_and_updates_sensor(self):
+        batch = await self.prepare()
+        report = await self.call("cancel_batch", {"batch_id": batch["id"]}, response=True)
+        await self.hass.async_block_till_done()
+        self.assertEqual(report["status"], "canceled")
+        self.assertIn("canceled_at", report)
+        self.assertEqual(self.engine.store.data["orders"]["1"]["status"], "canceled")
+        self.assertEqual(self.hass.states.get("sensor.prepared_batches").state, "0")
+        restored = ReorderStore(self.hass)
+        await restored.load()
+        self.assertEqual(restored.data["batches"][batch["id"]]["status"], "canceled")
+        self.assertEqual(restored.data["orders"]["1"]["status"], "canceled")
+        self.assertEqual((await self.call("preview_batch", response=True))["count"], 0)
+        self.transport.assert_not_awaited()
+
+    async def test_repeated_cancellation_after_reload_keeps_same_timestamp(self):
+        batch = await self.prepare()
+        first = await self.call("cancel_batch", {"batch_id": batch["id"]}, response=True)
+        self.assertTrue(await self.hass.config_entries.async_unload(self.entry.entry_id))
+        self.assertFalse(self.hass.services.has_service("reorder", "cancel_batch"))
+        self.assertFalse(self.hass.services.has_service("reorder", "review_batch"))
+        self.assertTrue(await self.hass.config_entries.async_setup(self.entry.entry_id))
+        await self.hass.async_block_till_done()
+        second = await self.call("cancel_batch", {"batch_id": batch["id"]}, response=True)
+        self.assertEqual(first, second)
+        self.transport.assert_not_awaited()
+
+    async def test_cancel_save_failure_restores_original_state(self):
+        batch = await self.prepare()
+        before = deepcopy(self.engine.store.data)
+        with patch.object(self.engine.store, "save", side_effect=OSError("disk full")):
+            with self.assertRaises(OSError):
+                await self.call("cancel_batch", {"batch_id": batch["id"]})
+        self.assertEqual(self.engine.store.data, before)
+        self.transport.assert_not_awaited()
+
+    async def test_cancel_notification_failure_is_nonfatal(self):
+        batch = await self.prepare()
+        with patch("custom_components.reorder.notifications.persistent_notification.async_create", side_effect=RuntimeError("display failed")):
+            with self.assertLogs("custom_components.reorder", level="WARNING"):
+                await self.call("cancel_batch", {"batch_id": batch["id"]})
+        self.assertEqual(self.engine.store.data["batches"][batch["id"]]["status"], "canceled")
+        self.transport.assert_not_awaited()
+
+    async def test_attempted_and_completed_batches_cannot_be_canceled_locally(self):
+        batch = await self.prepare()
+        await self.submit(batch)
+        before = deepcopy(self.engine.store.data)
+        with self.assertRaisesRegex(HomeAssistantError, "reconciled with Zinc"):
+            await self.call("cancel_batch", {"batch_id": batch["id"]})
+        self.assertEqual(self.engine.store.data, before)
+        self.transport.assert_awaited_once()
+
+    async def test_uncertain_submission_cannot_be_canceled(self):
+        batch = await self.prepare()
+        self.transport.side_effect = TimeoutError("simulated")
+        with self.assertRaises(TimeoutError):
+            await self.submit(batch)
+        with self.assertRaisesRegex(HomeAssistantError, "reconciled with Zinc"):
+            await self.call("cancel_batch", {"batch_id": batch["id"]})
+        self.assertEqual(self.engine.store.data["batches"][batch["id"]]["status"], "submission_unknown")
+        self.transport.assert_awaited_once()
+
+    async def test_cancellation_during_submission_cannot_hide_purchase(self):
+        batch = await self.prepare()
+        entered, release = asyncio.Event(), asyncio.Event()
+        async def request(*args):
+            entered.set()
+            await release.wait()
+            return {"id": "mock-zinc-id", "status": "pending"}
+        self.transport.side_effect = request
+        submission = asyncio.create_task(self.submit(batch))
+        try:
+            await asyncio.wait_for(entered.wait(), 5)
+            with self.assertRaisesRegex(HomeAssistantError, "reconciled with Zinc"):
+                await self.call("cancel_batch", {"batch_id": batch["id"]})
+        finally:
+            release.set()
+            await submission
+        self.assertEqual(self.engine.store.data["batches"][batch["id"]]["status"], "pending")
+        self.transport.assert_awaited_once()
+
+    async def test_canceled_batch_cannot_submit_or_reappear_on_schedule(self):
+        batch = await self.prepare()
+        await self.call("cancel_batch", {"batch_id": batch["id"]})
+        self.engine.store.data["batch_settings"]["strategy"] = "rolling"
+        await self.scheduled(None)
+        with self.assertRaises(HomeAssistantError):
+            await self.submit(batch)
+        with self.assertRaises(HomeAssistantError):
+            await self.call("submit_zinc", {"order_id": "1", "confirmation": "SANDBOX"})
+        self.assertEqual(len(self.engine.store.data["batches"]), 1)
+        self.transport.assert_not_awaited()
+
+    async def test_invalid_batch_membership_blocks_cancellation_and_review(self):
+        batch = await self.prepare()
+        self.engine.store.data["orders"]["1"]["batch_id"] = "another-batch"
+        before = deepcopy(self.engine.store.data)
+        for action in ("cancel_batch", "review_batch"):
+            with self.assertRaises(HomeAssistantError):
+                await self.call(action, {"batch_id": batch["id"]})
+        self.assertEqual(self.engine.store.data, before)
+        self.transport.assert_not_awaited()
+
     async def test_missing_shipping_address_blocks_submission(self):
         batch = await self.prepare()
         self.hass.config_entries.async_update_entry(self.entry, options={"zinc_api_key": "zn_test_not-a-real-key"})

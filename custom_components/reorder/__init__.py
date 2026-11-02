@@ -9,7 +9,7 @@ from .const import DOMAIN
 from .store import ReorderStore
 from .core import ReorderEngine
 from .zinc import ZincClient
-from .batch import create_batch, preview, scheduled_due
+from .batch import cancel_batch, create_batch, preview, review_batch, scheduled_due
 from homeassistant.helpers.event import async_track_time_interval
 from datetime import timedelta
 from homeassistant.util import dt as dt_util
@@ -123,6 +123,40 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             title="Reorder — Batch Ready", notification_id=f"reorder_batch_{batch['id']}")
         return dict(batch)
 
+    async def batch_review(call: ServiceCall) -> ServiceResponse:
+        try:
+            async with engine.lock:
+                report = review_batch(store.data, call.data["batch_id"])
+        except ValueError as err:
+            raise HomeAssistantError(str(err)) from err
+        lines = [
+            f"- {order['name']}: quantity {order['quantity']}, ceiling ${order['max_price']:.2f}\n"
+            f"  {order['product_id']}"
+            for order in report["orders"]
+        ]
+        async_notify(
+            hass,
+            f"Batch {report['id']}: {report['status']}.\n\n"
+            + "\n".join(lines)
+            + f"\n\nTotal price ceiling: ${report['max_price']:.2f}. This is not a quote. "
+            "Review only; this action does not submit or cancel an order.",
+            title="Reorder — Batch Review", notification_id=f"reorder_batch_{report['id']}",
+        )
+        return report
+
+    async def batch_cancel(call: ServiceCall) -> ServiceResponse:
+        try:
+            report = await cancel_batch(engine, call.data["batch_id"])
+        except ValueError as err:
+            raise HomeAssistantError(str(err)) from err
+        async_notify(
+            hass,
+            f"Batch {report['id']} and its {report['count']} queued product lines were canceled locally. "
+            "No purchase was made. These orders will not be included in another batch.",
+            title="Reorder — Batch Canceled", notification_id=f"reorder_batch_{report['id']}",
+        )
+        return report
+
     def notify_batch_status(report, operation):
         mode = "Sandbox simulation" if report["zinc_environment"] == "sandbox" else "Live order"
         async_notify(
@@ -187,6 +221,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.services.async_register(DOMAIN, "prepare_batch", prepare_batch, schema=vol.Schema({
         vol.Optional("max_items", default=10): vol.All(vol.Coerce(int), vol.Range(min=1, max=10))}),
         supports_response=SupportsResponse.OPTIONAL)
+    hass.services.async_register(DOMAIN, "review_batch", batch_review, schema=vol.Schema({
+        vol.Required("batch_id"): cv.string}),
+        supports_response=SupportsResponse.OPTIONAL)
+    hass.services.async_register(DOMAIN, "cancel_batch", batch_cancel, schema=vol.Schema({
+        vol.Required("batch_id"): cv.string}),
+        supports_response=SupportsResponse.OPTIONAL)
     hass.services.async_register(DOMAIN, "submit_batch_zinc", submit_batch, schema=vol.Schema({
         vol.Required("batch_id"): cv.string, vol.Required("confirmation"): cv.string}),
         supports_response=SupportsResponse.OPTIONAL)
@@ -215,7 +255,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if not await hass.config_entries.async_unload_platforms(entry, ["sensor"]):
         return False
-    for service in ("set_product", "remove_product", "approve_order", "cancel_order", "submit_zinc", "refresh_zinc", "queue_next_substitution", "preview_batch", "prepare_batch", "submit_batch_zinc", "refresh_batch_zinc"):
+    for service in ("set_product", "remove_product", "approve_order", "cancel_order", "submit_zinc", "refresh_zinc", "queue_next_substitution", "preview_batch", "prepare_batch", "submit_batch_zinc", "refresh_batch_zinc", "review_batch", "cancel_batch"):
         hass.services.async_remove(DOMAIN, service)
     hass.data[DOMAIN].pop(entry.entry_id, None)
     return True

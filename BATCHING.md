@@ -1,4 +1,4 @@
-# Reorder v0.4.2 — Batch testing
+# Reorder v0.4.3 — Batch testing
 
 **Development preview. No scheduled payments.** A weekly/rolling schedule only creates a persistent batch marked `ready`.
 
@@ -40,7 +40,7 @@ data:
 - Up to 10 distinct queued product records, same provider (`zinc`).
 - Schedules prepare batches for review, NOT automatic charge/checkout.
 - Individual submission is blocked for orders already locked in a batch.
-- No cancellation, splitting, batch edit, automatic fallback, or automatic product-status interpretation in this version.
+- Local cancellation is available for unsubmitted ready batches only. No retailer cancellation, splitting, batch edit, automatic fallback, or automatic per-item product-status interpretation is provided.
 - Weekly mode uses a 15-minute periodic check and local HA time; a weekly review is created only when pending eligible items exist. Rolling mode checks age of oldest queued eligible item.
 - The developer must verify Zinc API details and sandbox results before live transactions.
 - Back up the HA `.storage` directory before upgrades; no storage-version migration is necessary because the added keys have defaults.
@@ -124,3 +124,39 @@ requires an explicitly failed order and an explicit top-level/nested stock error
 (`product_out_of_stock` or legacy `out_of_stock`). Per-item `error_type` alone is not
 interpreted as whole-order stock failure. Batch replacements and partial-fulfillment
 reconciliation remain unsupported; no automatic replacements or retries were added.
+
+## Review and cancel local batches (v0.4.3)
+
+Review a batch without submitting, refreshing, or changing it:
+
+```yaml
+action: reorder.review_batch
+data:
+  batch_id: YOUR_REORDER_BATCH_ID
+```
+
+The notification lists the saved product names and URLs, quantities, price ceilings,
+and local batch status. Optional responses include the saved batch fields plus
+`orders` and `count`. Catalog edits do not rewrite these product snapshots. This
+works for ready, submitted, and canceled batches; it never contacts Zinc and does
+not need credentials. Refresh separately when you need the latest provider status.
+
+To discard a **ready, never-submitted** batch and its queued order lines:
+
+```yaml
+action: reorder.cancel_batch
+data:
+  batch_id: YOUR_REORDER_BATCH_ID
+```
+
+Both the batch and its member orders become `canceled`, remain in local history,
+and cannot be submitted or picked up by the batching schedule. This does not return
+the lines to the queue or remove Shopping List items. Repeating cancellation returns
+the same saved result, including `canceled_at`. Notification failure cannot undo a
+successful cancellation; a storage-write failure restores in-memory state and reports
+an error. Ready-batch counts update immediately after successful cancellation.
+
+Once a submission has started, including `submission_unknown`, local cancellation
+is rejected. A provider status change cannot reopen local cancellation. Reconcile
+those orders with Zinc; this action never sends a cancellation request to a retailer.
+No live transactions are required to test these actions.

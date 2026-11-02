@@ -130,3 +130,20 @@ refresh_batch_zinc:
       required: true
       selector:
         text:
+
+review_batch:
+  name: Review saved batch
+  description: Shows the batch's saved product URLs, quantities, status, and price ceilings without contacting Zinc. Supports an optional response.
+  fields:
+    batch_id:
+      required: true
+      selector:
+        text:
+cancel_batch:
+  name: Cancel unsubmitted batch
+  description: Cancels a ready local batch and all its queued orders. Does not cancel retailer purchases or return orders to the queue. Attempted submissions cannot be canceled here. Supports an optional response.
+  fields:
+    batch_id:
+      required: true
+      selector:
+        text:
