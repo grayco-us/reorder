@@ -33,7 +33,7 @@ def panel_data(engine, entry):
             "Live enabled" if key.startswith("zn_live_") and entry.options.get("zinc_live_enabled", False) else
             "Live disabled" if key.startswith("zn_live_") else
             "Not configured" if not key else "Invalid key")
-    environment = "sandbox" if mode == "Sandbox" else "live" if mode == "Live enabled" else None
+    environment = "sandbox" if mode == "Sandbox" else "live" if mode in ("Live enabled", "Live disabled") else None
     batches = []
     current_items = shopping_items(engine.hass)
     current_by_id = {str(item["id"]): item for item in current_items or []}
@@ -79,10 +79,44 @@ def panel_data(engine, entry):
                            else "removed" if current is None else "renamed" if norm(current.get("name") or "") not in labels
                            else "complete" if current.get("complete") else "pending")
             order["shopping_list_status"] = list_status
-            if (environment == batch.get("zinc_environment") and list_status == "pending"
+            order["receipt_result"] = deepcopy(batch.get("receipt_results", {}).get(order["id"]))
+            order["receipt_recorded"] = bool(original.get("shopping_list_completed_at"))
+            if (mode in ("Sandbox", "Live enabled") and environment == batch.get("zinc_environment") and list_status == "pending"
                     and receipt_eligible(original, batch, raw_orders)):
                 item["receivable_order_ids"].append(order["id"])
         item["item_mapping_incomplete"] = batch["status"] in ("order_placed", "order_failed", "failed") and any(order.get("provider_item") is None for order in item["orders"])
+        reasons = []
+        if item["review_error"]:
+            reasons.append("saved_details")
+        if batch["status"] == "submission_unknown":
+            reasons.append("unknown_with_id" if batch.get("zinc_order_id") else "unknown_without_id")
+        if batch.get("refresh_error"):
+            reasons.append("refresh_failed")
+        if batch.get("list_sync_error"):
+            reasons.append("list_sync_failed")
+        if batch.get("zinc_order_id") and batch.get("zinc_environment") != environment:
+            reasons.append("environment_mismatch")
+        details = batch.get("fulfillment", {})
+        if batch["status"] in ("failed", "order_failed") or details.get("outcome") in ("partial", "failed"):
+            reasons.append("partial_failure" if details.get("outcome") == "partial" else "order_failed")
+        if item["item_mapping_incomplete"]:
+            reasons.append("item_mapping")
+        if any((order.get("receipt_result") or {}).get("status") in ("skipped_missing", "skipped_renamed") for order in item["orders"]):
+            reasons.append("source_changed")
+        shipments = details.get("shipments", [])
+        if shipments and all(shipment.get("status") == "delivered" for shipment in shipments) and any(
+                order.get("provider_item") and order["provider_item"]["status"] in ("ordered", "shipped", "available_for_pickup")
+                and not order["delivery_confirmed"] for order in item["orders"]):
+            reasons.append("delivery_mapping")
+        if (not engine.store.data.get("preferences", {}).get("auto_complete_delivered", True)
+                and any(order["delivery_confirmed"] and order["shopping_list_status"] == "pending" and not order["receipt_recorded"] for order in item["orders"])):
+            reasons.append("manual_receipt")
+        item["attention_reasons"] = reasons
+        item["needs_attention"] = bool(reasons)
+        item["progress"] = {"total": len(item["orders"]),
+            "delivered": sum(bool(order.get("delivery_confirmed")) for order in item["orders"]),
+            "failed": sum((order.get("provider_item") or {}).get("status") in ("failed", "skipped", "cancelled") for order in item["orders"]),
+            "list_complete": sum(order.get("shopping_list_status") == "complete" for order in item["orders"])}
         batches.append(item)
     return {
         "mode": mode, "batches": batches, "queue": preview(engine.store.data),

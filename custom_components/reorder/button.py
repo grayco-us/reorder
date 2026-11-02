@@ -37,8 +37,7 @@ class ReorderBatchButton(ButtonEntity):
         if self.service == "refresh_batch_zinc":
             key = self.entry.options.get("zinc_api_key", "")
             mode = "sandbox" if key.startswith("zn_test_") else "live" if key.startswith("zn_live_") else None
-            enabled = mode == "sandbox" or (mode == "live" and self.entry.options.get("zinc_live_enabled", False))
-            return bool(enabled and batch.get("zinc_order_id") and batch.get("zinc_environment") == mode)
+            return bool(mode and batch.get("zinc_order_id") and batch.get("zinc_environment") == mode)
         return True
 
     async def async_press(self):

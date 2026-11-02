@@ -102,7 +102,8 @@ submit_zinc:
 refresh_zinc:
   name: Refresh Zinc order
   description: Fetches status for a legacy standalone order. Does not submit or cancel a purchase. Standalone orders
-    are not included in automatic batch tracking or delivery-to-list completion.
+    are not included in automatic batch tracking or delivery-to-list completion. Requires a valid matching-environment
+    key, not live purchasing enablement or shipping details.
   fields:
     order_id:
       required: true
@@ -153,7 +154,8 @@ refresh_batch_zinc:
   name: Refresh Zinc batch status
   description: Retrieves status without making a purchase. May check off original Shopping List IDs after confirmed
     item delivery when automatic completion is enabled. Placement alone never completes the list. Tracking also
-    runs every 15 minutes for unresolved batches; supports an optional saved response.
+    runs every 15 minutes for unresolved batches; supports an optional saved response. Requires a valid matching-environment
+    key, not live purchasing enablement or shipping details.
   fields:
     batch_id:
       required: true

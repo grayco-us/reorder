@@ -1,4 +1,4 @@
-# Sandbox ordering, tracking, and Shopping List receipt (v0.10.0)
+# Sandbox ordering, tracking, and Shopping List receipt (v0.11.0)
 
 The sidebar now supports the next stage of the workflow: explicitly submit a **sandbox**
 batch, retrieve item/fulfillment/tracking details, and automatically check off linked Shopping List items after confirmed per-item delivery.
@@ -134,3 +134,8 @@ already-complete ID and records it without another purchase. Removed/renamed ent
 and ambiguous product matches stay untouched. A new same-name list ID is never cleared
 by an earlier purchase. Polling cannot recover an uncertain submission without a Zinc ID;
 that still needs dashboard reconciliation.
+
+For per-line progress and guided handling of unknown/failed outcomes, see
+[RECOVERY.md](RECOVERY.md). Manual batch/standalone refresh now needs only a valid
+matching environment key; shipping details and live purchasing opt-in remain required
+for submission, not GET-only tracking. Automatic delivery-to-list updates can still run.

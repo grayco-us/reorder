@@ -1,4 +1,4 @@
-# Reorder sidebar app (v0.10.0)
+# Reorder sidebar app (v0.11.0)
 
 Reorder now bundles its own responsive frontend and automatically adds **Reorder**
 to Home Assistant's sidebar. There is no dashboard YAML to paste, no resource URL
@@ -164,3 +164,10 @@ Settings now includes event selection, destination pickers, Kiosk Satellite card
 presentation and a test button. Cart additions mean local queued requests, and batch
 review reminders mean saved unsubmitted work. Nothing is bought from a notification.
 See [NOTIFICATIONS.md](NOTIFICATIONS.md) for setup and delivery guarantees.
+
+## Tracking and recovery
+
+Use **Needs attention** for guided recovery and per-line delivery/list outcomes.
+Manual refresh stays available with matching credentials even when live purchasing is
+off. See [RECOVERY.md](RECOVERY.md); no recovery control retries a purchase or clears
+uncertain submission history.

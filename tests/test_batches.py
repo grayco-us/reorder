@@ -733,7 +733,7 @@ class BatchActionsTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(panel.sidebar_title, "Reorder")
         self.assertTrue(panel.require_admin)
         self.assertEqual(panel.config["entry_id"], self.entry.entry_id)
-        self.assertEqual(panel.config["_panel_custom"]["module_url"], "/reorder-assets/reorder-panel.js?v=0.10.0")
+        self.assertEqual(panel.config["_panel_custom"]["module_url"], "/reorder-assets/reorder-panel.js?v=0.11.0")
         self.assertEqual(panel.config["_panel_custom"]["name"], "reorder-panel")
 
     async def test_sidebar_snapshot_excludes_credentials_and_preserves_data(self):
@@ -2048,6 +2048,91 @@ class BatchActionsTest(unittest.IsolatedAsyncioTestCase):
             confirmation="PLACE LIVE ORDER", review_token=token) for _ in range(2)], return_exceptions=True)
         self.assertEqual(sum(isinstance(result, HomeAssistantError) for result in results), 1)
         self.transport.assert_awaited_once()
+
+    async def test_read_only_refresh_needs_neither_live_opt_in_nor_shipping(self):
+        from custom_components.reorder.frontend import panel_data
+        batch = await self.prepare()
+        await self.submit(batch)
+        stored = self.engine.store.data["batches"][batch["id"]]
+        self.transport.return_value = {"id": "mock-zinc-id", "status": "order_placed"}
+        for environment, key in (("live", "zn_live_not-a-real-key"), ("sandbox", "zn_test_not-a-real-key")):
+            stored["zinc_environment"] = environment
+            self.hass.config_entries.async_update_entry(self.entry, options={"zinc_api_key": key, "zinc_live_enabled": False})
+            self.engine.selected_batch_id = batch["id"]
+            self.engine.publish()
+            await self.hass.async_block_till_done()
+            self.assertTrue(panel_data(self.engine, self.entry)["batches"][0]["can_refresh"])
+            self.assertNotEqual(self.hass.states.get("button.reorder_refresh_batch").state, "unavailable")
+            await self.call("refresh_batch_zinc", {"batch_id": batch["id"]})
+            self.assertEqual(self.transport.await_args.args[0], "GET")
+        self.assertEqual(sum(call.args[0] == "POST" for call in self.transport.await_args_list), 1)
+
+    async def test_read_only_refresh_does_not_enable_live_submission(self):
+        batch = await self.prepare()
+        self.hass.config_entries.async_update_entry(self.entry, options={"zinc_api_key": "zn_live_not-a-real-key", "zinc_live_enabled": False})
+        with self.assertRaisesRegex(HomeAssistantError, "disabled"):
+            await self.submit(batch, confirmation="PLACE LIVE ORDER")
+        self.transport.assert_not_awaited()
+
+    async def test_recovery_unknown_outcome_distinguishes_known_and_missing_ids(self):
+        from custom_components.reorder.frontend import panel_data
+        batch = await self.prepare()
+        self.transport.side_effect = TimeoutError("synthetic uncertainty")
+        with self.assertRaises(TimeoutError):
+            await self.submit(batch)
+        snapshot = panel_data(self.engine, self.entry)["batches"][0]
+        self.assertIn("unknown_without_id", snapshot["attention_reasons"])
+        self.assertTrue(snapshot["needs_attention"])
+        self.assertFalse(snapshot["can_refresh"])
+        self.assertFalse(snapshot["can_cancel"])
+        self.engine.store.data["batches"][batch["id"]]["zinc_order_id"] = "known-test-id"
+        snapshot = panel_data(self.engine, self.entry)["batches"][0]
+        self.assertIn("unknown_with_id", snapshot["attention_reasons"])
+        self.assertTrue(snapshot["can_refresh"])
+        self.transport.assert_awaited_once()
+
+    async def test_recovery_progress_distinguishes_delivery_failure_and_list_completion(self):
+        from custom_components.reorder.frontend import panel_data
+        batch, coffee = await self.delivered_coffee()
+        await self.configure_coffee(name="Tea", aliases=[], product_id="https://zinc.com/shop/products/test-out-of-stock")
+        await self.add_shopping_item("Tea")
+        tea = next(order for order in self.engine.store.data["orders"].values() if order["product_key"] == "tea")
+        stored = self.engine.store.data["batches"][batch["id"]]
+        stored["order_ids"].append(tea["id"])
+        tea.update(batch_id=batch["id"], zinc_environment="sandbox", zinc_order_id="mock-zinc-id", status="submitted")
+        self.transport.return_value["items"].append(self.provider_item(tea, "failed", "product_out_of_stock"))
+        await self.call("refresh_batch_zinc", {"batch_id": batch["id"]})
+        snapshot = panel_data(self.engine, self.entry)["batches"][0]
+        self.assertEqual(snapshot["progress"], {"total": 2, "delivered": 1, "failed": 1, "list_complete": 1})
+        self.assertIn("partial_failure", snapshot["attention_reasons"])
+        self.assertEqual(snapshot["orders"][0]["receipt_result"]["status"], "completed")
+        self.assertTrue(snapshot["orders"][0]["receipt_recorded"])
+
+    async def test_recovery_tracks_source_renames_and_unverified_delivered_packages(self):
+        from custom_components.reorder.frontend import panel_data
+        batch, saved = await self.delivered_coffee()
+        await self.source_change(name="Unrelated request")
+        await self.call("refresh_batch_zinc", {"batch_id": batch["id"]})
+        snapshot = panel_data(self.engine, self.entry)["batches"][0]
+        self.assertIn("source_changed", snapshot["attention_reasons"])
+        self.assertEqual(snapshot["orders"][0]["receipt_result"]["status"], "skipped_renamed")
+        self.transport.return_value["items"][0]["status"] = "ordered"
+        self.transport.return_value["tracking_numbers"] = [{"id": "package-1", "status": "delivered", "order_item_ids": ["provider-" + saved["id"]], "item_mapping": "inferred"}]
+        await self.call("refresh_batch_zinc", {"batch_id": batch["id"]})
+        snapshot = panel_data(self.engine, self.entry)["batches"][0]
+        self.assertIn("delivery_mapping", snapshot["attention_reasons"])
+        self.assertEqual(snapshot["progress"]["delivered"], 0)
+
+    async def test_recovery_environment_mismatch_does_not_expose_refresh_or_purchase(self):
+        from custom_components.reorder.frontend import panel_data
+        batch = await self.prepare()
+        await self.submit(batch)
+        self.hass.config_entries.async_update_entry(self.entry, options={"zinc_api_key": "zn_live_not-a-real-key", "zinc_live_enabled": False})
+        snapshot = panel_data(self.engine, self.entry)["batches"][0]
+        self.assertIn("environment_mismatch", snapshot["attention_reasons"])
+        self.assertFalse(snapshot["can_refresh"])
+        self.assertFalse(snapshot["can_submit_live"])
+        self.assertFalse(snapshot["can_submit_sandbox"])
 
     async def test_missing_shipping_address_blocks_submission(self):
         batch = await self.prepare()

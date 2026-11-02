@@ -1,4 +1,4 @@
-# First live trial (v0.10.0)
+# First live trial (v0.11.0)
 
 This guide is for a user-run real purchase, not another Sandbox simulation. No live
 order has been verified by the automated tests. Live submission is available in the sidebar for administrators, with live purchasing
@@ -68,9 +68,10 @@ Run that action **once**. It can spend real money. Do not use the standalone
 `reorder.submit_zinc` action for a prepared batch. After the attempt, turn live
 purchasing off to prevent new live submissions; keep the same live key configured.
 Read-only automatic batch tracking and delivery completion continue with that key.
-Manual Refresh is disabled by the existing live-mode guard while live purchasing is
-off; use the periodic updates, or deliberately re-enable live mode for manual refresh
-and turn it off afterward. Enabling it alone does not submit anything.
+Manual **Refresh status** also works with live purchasing off and needs no shipping
+fields, provided the valid key matches the saved environment. It reads the existing
+order; confirmed delivery may still complete its linked list entries. Use
+[Needs attention and recovery](RECOVERY.md) for failures or uncertain outcomes.
 
 If an error occurs, inspect saved batch state and the Zinc dashboard before any
 further purchase. `submission_unknown`, timeouts, HTTP errors or missing notifications

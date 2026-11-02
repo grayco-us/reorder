@@ -2,6 +2,16 @@
 
 Home Assistant custom integration for routing exact, preapproved shopping-list items to a persistent order queue, with **Zinc API submission (sandbox first)**.
 
+## v0.11.0: Tracking and guided recovery
+
+**Batches → Needs attention** brings together uncertain submissions, tracking/list
+errors, failed/partial fulfillment, credential mismatches and ambiguous delivery links.
+Each batch separates delivered lines, failed/skipped lines and completed list entries;
+per-item results explain skipped or failed list updates. Refresh remains available with
+live purchasing off and needs no shipping details. It only reads the existing Zinc order;
+configured delivery-to-list completion can still run. Purchasing guards are unchanged.
+See [RECOVERY.md](RECOVERY.md) for safe next steps and dashboard-reconciliation limits.
+
 ## v0.10.0: Reviewed live submission in the app
 
 Administrators with a live key and live purchasing enabled can select a ready batch,

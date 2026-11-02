@@ -351,3 +351,31 @@ test("tracking and partial failures are visible with escaped safe links and pric
   view._liveReviewToken = "stale-seal";
   await view._submitLive();
  });
+
+ test("attention filter shows only flagged batches and safe recovery instructions", () => {
+  const view = panel();
+  view._data.batches[2].needs_attention = true;
+  view._data.batches[2].attention_reasons = ["unknown_without_id"];
+  view._filter = "attention";
+  const html = view._batchList();
+  assert.match(html, /Needs reconciliation/);
+  assert.doesNotMatch(html, /ready-batch/);
+  assert.match(view._recovery(view._data.batches[2]), /no Zinc order ID/);
+  assert.match(view._recovery(view._data.batches[2]), /Do not invent an ID/);
+  assert.doesNotMatch(view._recovery(view._data.batches[2]), /data-action=/);
+ });
+
+ test("tracking progress distinguishes delivered lines from completed list entries", () => {
+  const view = panel();
+  assert.match(view._recovery({progress: {total: 2, delivered: 1, failed: 1, list_complete: 0}}), /1 of 2 line/);
+  assert.match(view._recovery({needs_attention: true, attention_reasons: ["list_sync_failed"]}), /No new purchase is needed/);
+  assert.match(view._products([{name: "Coffee", quantity: 1, max_price: 10, shopping_list_status: "pending", receipt_recorded: true, receipt_result: {status: "skipped_renamed"}}]), /will not be checked off again automatically/);
+ });
+
+ test("disabled live mode explains available read-only refresh", () => {
+  const view = panel();
+  view._data.mode = "Live disabled";
+  assert.match(view._guidance(), /Refresh status remains available/);
+  view._filter = "attention";
+  assert.match(view._batchList(), /No batches need attention/);
+ });

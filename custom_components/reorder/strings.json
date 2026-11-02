@@ -106,7 +106,7 @@
       },
       "zinc_settings": {
         "title": "Zinc settings",
-        "description": "Sandbox uses zn_test_ credentials and simulated orders. Live uses zn_live_ credentials and can spend real money only after live purchasing is enabled and an action is explicitly confirmed. The sidebar submits Sandbox batches only. Changing keys does not convert or cancel saved orders.",
+        "description": "Sandbox uses zn_test_ credentials and simulated orders. Live uses zn_live_ credentials and can spend real money only with live purchasing enabled and an explicitly confirmed submission. The sidebar offers separate live review with saved-content acknowledgement and PLACE LIVE ORDER. Changing keys does not convert or cancel saved orders.",
         "data": {
           "zinc_api_key": "Zinc API key",
           "zinc_live_enabled": "Enable live Zinc purchasing",
@@ -120,7 +120,7 @@
         },
         "data_description": {
           "zinc_api_key": "Choose the intended Zinc account and environment. Only records matching the current key environment can refresh. Read-only batch tracking continues with a live key even when live purchasing is off. Never share this key.",
-          "zinc_live_enabled": "Allows native live submission with the exact phrase PLACE LIVE ORDER. It does not submit anything, enable scheduled purchasing, or add a live submit button to the sidebar. Turn off again after the trial to prevent new live submissions.",
+          "zinc_live_enabled": "Allows live submission through the app review flow or native action with PLACE LIVE ORDER. Enabling it alone never submits anything or schedules purchases. Turn it off after a trial to prevent new submissions; matching-key status refresh and delivery-to-list synchronization continue.",
           "ship_first_name": "Recipient given name.",
           "ship_last_name": "Recipient family name.",
           "ship_address_line1": "Street address for shipping.",

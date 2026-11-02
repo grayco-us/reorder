@@ -68,14 +68,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     async def cancel_order(call: ServiceCall):
         await change_order(call, "canceled")
 
-    def zinc_settings():
-        opts = entry.options
-        key = opts.get("zinc_api_key", "")
+    def zinc_read_settings():
+        key = entry.options.get("zinc_api_key", "")
         if not key:
             raise HomeAssistantError("Configure Zinc credentials first")
         if not key.startswith(("zn_test_", "zn_live_")):
             raise HomeAssistantError("Use a Zinc sandbox or live API key")
-        is_sandbox = key.startswith("zn_test_")
+        return ZincClient(async_get_clientsession(hass), key), key.startswith("zn_test_")
+
+    def zinc_settings():
+        opts = entry.options
+        client, is_sandbox = zinc_read_settings()
         if not is_sandbox and not opts.get("zinc_live_enabled", False):
             raise HomeAssistantError("Live Zinc ordering is disabled")
         address_fields = ("first_name", "last_name", "address_line1", "city", "state", "postal_code", "phone_number")
@@ -83,7 +86,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         if any(not value for value in address.values()):
             raise HomeAssistantError("Configure all required shipping address fields")
         address["country"] = "US"
-        return ZincClient(async_get_clientsession(hass), key), address, is_sandbox
+        return client, address, is_sandbox
 
     async def submit_zinc(call: ServiceCall):
         client, address, sandbox = zinc_settings()
@@ -95,7 +98,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             raise HomeAssistantError(str(err)) from err
 
     async def refresh_zinc(call: ServiceCall):
-        client, _, sandbox = zinc_settings()
+        client, sandbox = zinc_read_settings()
         order = engine.store.data["orders"].get(call.data["order_id"])
         if not order or order.get("zinc_environment") != ("sandbox" if sandbox else "live"):
             raise HomeAssistantError("Order not found in current Zinc environment")
@@ -191,7 +194,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         return report
 
     async def refresh_batch(call: ServiceCall) -> ServiceResponse:
-        client, _, sandbox = zinc_settings()
+        client, sandbox = zinc_read_settings()
         batch = store.data.get("batches", {}).get(call.data["batch_id"])
         if not batch or batch.get("zinc_environment") != ("sandbox" if sandbox else "live"):
             raise HomeAssistantError("Batch not found in current environment")
