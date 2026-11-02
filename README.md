@@ -2,12 +2,28 @@
 
 Home Assistant custom integration for routing exact, preapproved shopping-list items to a persistent order queue, with **Zinc API submission (sandbox first)**.
 
+## v0.8.0: Delivery completes the Shopping List
+
+Tracked batches now refresh automatically every 15 minutes (GET only, at most ten
+batches per pass). A uniquely matched provider-delivered line checks off its original
+Shopping List ID. Completed entries leave the active list and remain in completed
+history. Order placement, shipped packages, failed items, ambiguous matches, renamed
+entries and replacement IDs never trigger completion. Sandbox delivery is simulated.
+
+**Reorder → Settings → Automatically check off linked list items after confirmed
+delivery** is enabled by default; disable it for manual receipt. A list failure never
+hides saved delivery, is shown inline, and retries on refresh. Completed markers survive
+restarts; unchecking an already synchronized entry is respected. Fresh requests still
+obey cooldown. The same 15-minute pass reconciles missed source additions, edits and
+removals, including requests previously blocked by an active order/cooldown. It never
+submits or retries purchases. See [the ordering guide](ORDERING.md).
+
 ## v0.7.0: Sandbox submission, tracking and explicit list receipt
 
 Ready sandbox batches can now be submitted from the sidebar after typing **SANDBOX**.
 The server independently requires a `zn_test_` key; live purchase controls are not
 exposed. Refresh retains safe per-item outcomes, partial failures, tracking and reported
-costs. Placement and delivery remain distinct; no list item is cleared automatically.
+costs. Placement and delivery remain distinct; v0.8.0 adds completion only after confirmed item delivery.
 
 Use **Complete test list items**, select successful linked lines, and type **SIMULATE
 RECEIPT** to exercise list completion without claiming provider delivery. Failed/skipped,
@@ -155,7 +171,7 @@ No real orders or payment credentials are used in automated tests.
 
 A real order can charge your funded Zinc wallet, including shipping/tax, within the configured total-order ceiling. `max_price` is a **total order cap in USD**, including tax and shipping, not a unit price. Address and API key are stored in Home Assistant's config-entry options. Protect your HA instance, backups, and diagnostics; never commit secrets to Git.
 
-The sandbox success path has been manually exercised in a development Home Assistant instance. Automated regression tests use mocked Zinc transport; live purchasing and the full range of sandbox failures remain unverified. Test carefully before enabling live mode. Order status is retrieved manually (webhooks and automated polling are planned). No automated shopping-list removal or queue retry is performed.
+The sandbox success path has been manually exercised in a development Home Assistant instance. Automated regression tests use mocked Zinc transport; live purchasing and the full range of sandbox failures remain unverified. Test carefully before enabling live mode. Batch status is checked every 15 minutes or through Refresh. Confirmed delivered batch lines can complete their linked list entries; purchases are never retried automatically. Legacy standalone order status remains manually refreshed.
 
 ## Install
 
@@ -220,7 +236,7 @@ Create a GitHub Release from that tag and mark it **Pre-release**. To install fr
 ## Next milestones
 
 - Automatable Zinc submission behind per-product purchasing enablement and whole-house monthly caps.
-- Webhook verification and status tracking including delivery.
+- Webhook verification and push status updates.
 - More descriptive statuses, confirmation via dashboard, easier product lookup, secrets/password selector improvements.
 - Kroger cart provider.
 

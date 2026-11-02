@@ -203,10 +203,18 @@ history. Submission rechecks linked list state, while in-flight/submitted reques
 remain untouched. Product and batch/list preference forms now live in the sidebar;
 credentials and delivery configuration remain native and are preserved by legacy saves.
 
-## Sandbox order and receipt controls (v0.7.0)
+## Sandbox order and receipt controls (v0.8.0)
 
 The sidebar now supports explicitly confirmed sandbox submission, safe fulfillment/
 tracking details, and selected receipt/list completion. It does not expose live purchasing
 or automatically clear Shopping List items. Follow [ORDERING.md](ORDERING.md), starting
 with the success URL, then separate failure scenarios. Partial/mismatched lines are
 never guessed, and existing submission/idempotency/cooldown protections still apply.
+
+## Delivery/list synchronization (v0.8.0)
+
+Tracked batches refresh every 15 minutes using GET requests only. Confirmed delivered
+lines complete their exact linked Shopping List IDs by default; use Settings to choose
+manual receipt. Failed, ambiguous, renamed or replacement entries remain untouched.
+Delivery is saved before source updates, and list failures retry without another
+purchase. See [ORDERING.md](ORDERING.md) for recovery and repeat-request behavior.

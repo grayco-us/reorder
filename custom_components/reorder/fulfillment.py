@@ -23,6 +23,15 @@ def public_url(value):
         return None
 
 
+def identifiers(value):
+    """Optional provider IDs only; malformed/ambiguous mappings are unusable."""
+    if not isinstance(value, list) or not value or len(value) > 100:
+        return None
+    if any(safe_code(item) is None for item in value) or len(set(value)) != len(value):
+        return None
+    return list(value)
+
+
 def day(value):
     try:
         return date.fromisoformat(value).isoformat() if isinstance(value, str) else None
@@ -44,14 +53,18 @@ def fulfillment_snapshot(response, previous=None):
                 raise ValueError("Zinc response has an invalid product item")
             items.append({"id": text(item.get("id")), "url": public_url(item["url"]),
                           "quantity": item["quantity"], "status": safe_code(item["status"]),
-                          "error_code": safe_code(item.get("error_type"))})
+                          "error_code": safe_code(item.get("error_type")),
+                          "tracking_number_ids": identifiers(item.get("tracking_number_ids"))})
         result["items"] = items
     if "tracking_numbers" in response:
         shipments = []
         for shipment in response["tracking_numbers"]:
             if not isinstance(shipment, dict):
                 raise ValueError("Zinc response has invalid tracking data")
-            shipments.append({"carrier": text(shipment.get("carrier"), 64),
+            shipments.append({"id": safe_code(shipment.get("id")),
+                "order_item_ids": identifiers(shipment.get("order_item_ids")),
+                "item_mapping": shipment.get("item_mapping") if shipment.get("item_mapping") in ("exact", "inferred") else None,
+                "carrier": text(shipment.get("carrier"), 64),
                 "tracking_number": text(shipment.get("tracking_number")),
                 "status": safe_code(shipment.get("status")),
                 "url": public_url(shipment.get("zinc_tracking_url")),
@@ -77,6 +90,8 @@ def fulfillment_snapshot(response, previous=None):
 
 
 def mapped_item(order, fulfillment, orders=None):
+    if orders is not None and any(other is None for other in orders):
+        return None
     if orders is not None and sum(other["product_id"] == order["product_id"] and other["quantity"] == order["quantity"] for other in orders) != 1:
         return None
     matches = [item for item in fulfillment.get("items", [])
@@ -84,7 +99,30 @@ def mapped_item(order, fulfillment, orders=None):
     return matches[0] if len(matches) == 1 else None
 
 
-def receipt_eligible(order, batch, orders):
+def item_delivery_confirmed(item, fulfillment):
+    """Use item delivery or exact links to delivered packages, never inferred links."""
+    if not item or item.get("error_code"):
+        return False
+    if item["status"] == "delivered":
+        return True
+    if item["status"] not in ("ordered", "shipped", "available_for_pickup") or not item.get("id"):
+        return False
+    if sum(other.get("id") == item["id"] for other in fulfillment.get("items", [])) != 1:
+        return False
+    known_ids = item.get("tracking_number_ids") or []
+    related = [shipment for shipment in fulfillment.get("shipments", [])
+               if item["id"] in (shipment.get("order_item_ids") or []) or shipment.get("id") in known_ids]
+    if not related or any(shipment.get("item_mapping") != "exact"
+                          or item["id"] not in (shipment.get("order_item_ids") or [])
+                          or shipment.get("status") != "delivered" for shipment in related):
+        return False
+    shipment_ids = [shipment.get("id") for shipment in related]
+    if any(value is None for value in shipment_ids) or len(set(shipment_ids)) != len(shipment_ids):
+        return False
+    return not known_ids or set(known_ids) == set(shipment_ids)
+
+
+def receipt_eligible(order, batch, orders, delivered_only=False):
     """Sandbox can simulate receipt; real list updates require explicit item delivery."""
     if order.get("zinc_environment") != batch.get("zinc_environment") or order.get("zinc_order_id") != batch.get("zinc_order_id"):
         return False
@@ -93,5 +131,7 @@ def receipt_eligible(order, batch, orders):
     item = mapped_item(order, batch.get("fulfillment", {}), orders)
     if not item or item.get("error_code"):
         return False
-    allowed = {"ordered", "shipped", "available_for_pickup", "delivered"} if batch.get("zinc_environment") == "sandbox" else {"delivered"}
-    return item["status"] in allowed and bool(order.get("shopping_item_id"))
+    confirmed = (item["status"] in {"ordered", "shipped", "available_for_pickup", "delivered"}
+                 if batch.get("zinc_environment") == "sandbox" and not delivered_only
+                 else item_delivery_confirmed(item, batch.get("fulfillment", {})))
+    return confirmed and bool(order.get("shopping_item_id"))

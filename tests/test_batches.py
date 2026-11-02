@@ -733,7 +733,7 @@ class BatchActionsTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(panel.sidebar_title, "Reorder")
         self.assertTrue(panel.require_admin)
         self.assertEqual(panel.config["entry_id"], self.entry.entry_id)
-        self.assertEqual(panel.config["_panel_custom"]["module_url"], "/reorder-assets/reorder-panel.js?v=0.7.0")
+        self.assertEqual(panel.config["_panel_custom"]["module_url"], "/reorder-assets/reorder-panel.js?v=0.8.0")
         self.assertEqual(panel.config["_panel_custom"]["name"], "reorder-panel")
 
     async def test_sidebar_snapshot_excludes_credentials_and_preserves_data(self):
@@ -1510,7 +1510,7 @@ class BatchActionsTest(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(self.hass.data["shopping_list"].items[-1]["complete"])
         self.assertEqual(self.transport.await_count, 2)
 
-    async def test_provider_delivery_does_not_clear_list_and_starts_repeat_cooldown(self):
+    async def test_provider_delivery_completes_list_and_starts_repeat_cooldown(self):
         await self.configure_coffee()
         await self.add_shopping_item("coffee")
         batch = await self.prepare()
@@ -1519,11 +1519,207 @@ class BatchActionsTest(unittest.IsolatedAsyncioTestCase):
         self.transport.return_value = {"id": "mock-zinc-id", "status": "order_placed", "items": [self.provider_item(saved, "delivered")]}
         await self.call("refresh_batch_zinc", {"batch_id": batch["id"]})
         self.assertIn("delivery_confirmed_at", saved)
-        self.assertFalse(self.hass.data["shopping_list"].items[-1]["complete"])
+        self.assertTrue(self.hass.data["shopping_list"].items[-1]["complete"])
         await self.add_shopping_item("coffee")
         self.assertEqual(len(self.coffee_orders()), 1)
         self.assertEqual(self.engine.intake_events[0]["reason"], "cooldown")
         self.assertEqual(self.transport.await_count, 2)
+
+    async def delivered_coffee(self):
+        self.engine.store.data["orders"].clear()
+        await self.configure_coffee()
+        await self.add_shopping_item("coffee")
+        batch = await self.prepare()
+        await self.submit(batch)
+        saved = self.coffee_orders()[0]
+        self.transport.return_value = {"id": "mock-zinc-id", "status": "order_placed",
+            "items": [self.provider_item(saved, "delivered")]}
+        return batch, saved
+
+    async def test_auto_delivery_completes_once_and_does_not_reclear_unchecked_item(self):
+        batch, saved = await self.delivered_coffee()
+        with patch.object(type(self.hass.services), "async_call", wraps=self.hass.services.async_call) as calls:
+            await self.engine.refresh_batch_zinc(batch["id"], ZincClient(None, "zn_test_fake"))
+            await self.hass.async_block_till_done()
+            first = saved["shopping_list_completed_at"]
+            await self.source_change(complete=False)
+            await self.engine.refresh_batch_zinc(batch["id"], ZincClient(None, "zn_test_fake"))
+            updates = [call for call in calls.await_args_list if call.args[:2] == ("todo", "update_item")]
+            self.assertEqual(len(updates), 1)
+        self.assertFalse(self.hass.data["shopping_list"].items[-1]["complete"])
+        self.assertEqual(saved["shopping_list_completed_at"], first)
+        self.assertEqual(saved["status"], "order_placed")
+
+    async def test_auto_delivery_does_not_complete_replacement_uuid_or_renamed_source(self):
+        batch, saved = await self.delivered_coffee()
+        original = self.hass.data["shopping_list"].items[-1]
+        await self.hass.data["shopping_list"].async_remove(original["id"])
+        await self.add_shopping_item("coffee")
+        await self.engine.refresh_batch_zinc(batch["id"], ZincClient(None, "zn_test_fake"))
+        self.assertFalse(self.hass.data["shopping_list"].items[-1]["complete"])
+        self.assertEqual(self.engine.store.data["batches"][batch["id"]]["receipt_results"][saved["id"]]["status"], "skipped_missing")
+
+    async def test_auto_delivery_failure_preserves_delivery_and_retries_list_only(self):
+        batch, saved = await self.delivered_coffee()
+        original = self.hass.services.async_call
+        async def fail_list(domain, service, *args, **kwargs):
+            if domain == "todo":
+                raise HomeAssistantError("synthetic failure")
+            return await original(domain, service, *args, **kwargs)
+        with patch.object(type(self.hass.services), "async_call", side_effect=fail_list):
+            report = await self.engine.refresh_batch_zinc(batch["id"], ZincClient(None, "zn_test_fake"))
+        self.assertEqual(report["status"], "order_placed")
+        self.assertTrue(report["list_sync_error"])
+        self.assertIn("delivery_confirmed_at", saved)
+        report = await self.engine.refresh_batch_zinc(batch["id"], ZincClient(None, "zn_test_fake"))
+        self.assertFalse(report["list_sync_error"])
+        self.assertTrue(self.hass.data["shopping_list"].items[-1]["complete"])
+        self.assertTrue(all(call.args[0] == "GET" for call in self.transport.await_args_list[1:]))
+
+    async def test_delivery_automation_can_be_disabled_without_disabling_tracking(self):
+        batch, saved = await self.delivered_coffee()
+        await self.engine.update_preferences(strategy="manual", weekday=6, hour=10,
+            rolling_hours=48, auto_complete_delivered=False)
+        await self.engine.refresh_batch_zinc(batch["id"], ZincClient(None, "zn_test_fake"))
+        self.assertFalse(self.hass.data["shopping_list"].items[-1]["complete"])
+        self.assertIn("delivery_confirmed_at", saved)
+        # Older clients omitting the new preference preserve its saved value.
+        await self.engine.update_preferences(strategy="manual", weekday=6, hour=10, rolling_hours=48)
+        self.assertFalse(self.engine.store.data["preferences"]["auto_complete_delivered"])
+
+    async def test_periodic_tracking_get_only_and_completed_batches_stop_polling(self):
+        batch, saved = await self.delivered_coffee()
+        # Read-only tracking works without purchasing enablement or address fields.
+        self.hass.config_entries.async_update_entry(self.entry, options={"zinc_api_key": "zn_test_not-a-real-key"})
+        await self.scheduled(None)
+        await self.hass.async_block_till_done()
+        self.assertTrue(self.hass.data["shopping_list"].items[-1]["complete"])
+        count = self.transport.await_count
+        await self.scheduled(None)
+        self.assertEqual(self.transport.await_count, count)
+        self.assertEqual(self.transport.await_args_list[-1].args[0], "GET")
+
+    async def test_reconciliation_recovers_missed_add_remove_and_completion_events(self):
+        await self.configure_coffee()
+        await self.add_shopping_item("coffee")
+        batch = await self.prepare()
+        # Simulate deletion while Reorder was offline: no source event is emitted.
+        self.hass.data["shopping_list"].items.clear()
+        await self.engine.reconcile_shopping_list()
+        self.assertEqual(self.engine.store.data["batches"][batch["id"]]["status"], "invalidated")
+        self.hass.data["shopping_list"].items.append({"id": "offline-add", "name": "coffee", "complete": False})
+        await self.engine.reconcile_shopping_list()
+        await self.engine.reconcile_shopping_list()
+        self.assertEqual(sum(order["status"] == "queued" for order in self.coffee_orders()), 1)
+        self.assertEqual(self.coffee_orders()[-1]["shopping_item_id"], "offline-add")
+        self.transport.assert_not_awaited()
+
+    async def test_poll_failure_is_visible_and_later_refresh_clears_it(self):
+        batch, saved = await self.delivered_coffee()
+        response = self.transport.return_value
+        self.transport.side_effect = TimeoutError("private provider payload")
+        with self.assertLogs("custom_components.reorder", level="WARNING"):
+            await self.engine.refresh_pending_batches(ZincClient(None, "zn_test_fake"), "sandbox")
+        self.assertTrue(self.engine.store.data["batches"][batch["id"]]["refresh_error"])
+        self.assertEqual(saved["status"], "submitted")
+        self.transport.side_effect = None
+        self.transport.return_value = response
+        await self.engine.refresh_pending_batches(ZincClient(None, "zn_test_fake"), "sandbox")
+        self.assertNotIn("refresh_error", self.engine.store.data["batches"][batch["id"]])
+        self.assertTrue(self.hass.data["shopping_list"].items[-1]["complete"])
+
+    async def test_delivered_partial_batch_completes_only_delivered_lines(self):
+        batch, coffee = await self.delivered_coffee()
+        await self.configure_coffee(name="Tea", aliases=[], product_id="https://zinc.com/shop/products/test-out-of-stock")
+        await self.add_shopping_item("Tea")
+        tea = next(order for order in self.engine.store.data["orders"].values() if order["product_key"] == "tea")
+        # Synthetic provider membership; no additional submission.
+        stored = self.engine.store.data["batches"][batch["id"]]
+        stored["order_ids"].append(tea["id"])
+        tea.update(batch_id=batch["id"], zinc_environment="sandbox", zinc_order_id="mock-zinc-id", status="submitted")
+        self.transport.return_value["items"].append(self.provider_item(tea, "failed", "product_out_of_stock"))
+        await self.engine.refresh_batch_zinc(batch["id"], ZincClient(None, "zn_test_fake"))
+        self.assertTrue(self.hass.data["shopping_list"].items[0]["complete"])
+        self.assertFalse(self.hass.data["shopping_list"].items[1]["complete"])
+        self.assertEqual(stored["fulfillment"]["outcome"], "partial")
+
+    async def test_auto_delivery_metadata_failure_keeps_provider_state_and_recovers(self):
+        batch, saved = await self.delivered_coffee()
+        with patch.object(self.engine.store, "save", side_effect=[None, OSError("disk full"), None]):
+            with self.assertLogs("custom_components.reorder", level="WARNING"):
+                report = await self.engine.refresh_batch_zinc(batch["id"], ZincClient(None, "zn_test_fake"))
+        self.assertEqual(report["status"], "order_placed")
+        self.assertTrue(report["list_sync_error"])
+        self.assertNotIn("shopping_list_completed_at", saved)
+        self.assertTrue(self.hass.data["shopping_list"].items[-1]["complete"])
+        await self.engine.refresh_batch_zinc(batch["id"], ZincClient(None, "zn_test_fake"))
+        self.assertIn("shopping_list_completed_at", saved)
+        self.assertFalse(self.engine.store.data["batches"][batch["id"]]["list_sync_error"])
+
+    async def test_delivery_completion_survives_reload_and_does_not_reclear(self):
+        batch, saved = await self.delivered_coffee()
+        await self.engine.refresh_batch_zinc(batch["id"], ZincClient(None, "zn_test_fake"))
+        await self.hass.async_block_till_done()
+        anchor = saved["shopping_list_completed_at"]
+        self.assertTrue(await self.hass.config_entries.async_unload(self.entry.entry_id))
+        self.assertTrue(await self.hass.config_entries.async_setup(self.entry.entry_id))
+        await self.hass.async_block_till_done()
+        self.engine = self.hass.data["reorder"][self.entry.entry_id]
+        await self.source_change(complete=False)
+        await self.engine.refresh_batch_zinc(batch["id"], ZincClient(None, "zn_test_fake"))
+        self.assertFalse(self.hass.data["shopping_list"].items[-1]["complete"])
+        self.assertEqual(self.coffee_orders()[0]["shopping_list_completed_at"], anchor)
+
+    async def test_auto_delivery_skips_changed_name_and_ambiguous_mapping(self):
+        batch, saved = await self.delivered_coffee()
+        await self.source_change(name="Different request")
+        report = await self.engine.refresh_batch_zinc(batch["id"], ZincClient(None, "zn_test_fake"))
+        self.assertEqual(report["receipt_results"][saved["id"]]["status"], "skipped_renamed")
+        self.assertFalse(self.hass.data["shopping_list"].items[-1]["complete"])
+        await self.source_change(name="coffee")
+        self.transport.return_value["items"].append(deepcopy(self.transport.return_value["items"][0]))
+        await self.engine.refresh_batch_zinc(batch["id"], ZincClient(None, "zn_test_fake"))
+        self.assertFalse(self.hass.data["shopping_list"].items[-1]["complete"])
+
+    async def test_polling_is_bounded_fair_and_never_submits(self):
+        batches = {}
+        for index in range(12):
+            batches[str(index)] = {"id": str(index), "order_ids": ["1"], "status": "pending",
+                "zinc_order_id": "provider-" + str(index), "zinc_environment": "sandbox"}
+        self.engine.store.data["batches"] = batches
+        client = MagicMock()
+        with patch.object(self.engine, "refresh_batch_zinc", AsyncMock()) as refresh:
+            await self.engine.refresh_pending_batches(client, "live")
+            refresh.assert_not_awaited()
+            await self.engine.refresh_pending_batches(client, "sandbox")
+            self.assertEqual(refresh.await_count, 10)
+            await self.engine.refresh_pending_batches(client, "sandbox")
+            self.assertEqual(refresh.await_count, 20)
+            self.assertEqual(len({call.args[0] for call in refresh.await_args_list}), 12)
+        self.transport.assert_not_awaited()
+
+    async def test_exact_split_package_delivery_completes_only_after_all_packages_arrive(self):
+        batch, saved = await self.delivered_coffee()
+        item = self.provider_item(saved, "ordered") | {"tracking_number_ids": ["package-1", "package-2"]}
+        packages = [{"id": "package-1", "status": "delivered", "order_item_ids": [item["id"]], "item_mapping": "exact"},
+                    {"id": "package-2", "status": "in_transit", "order_item_ids": [item["id"]], "item_mapping": "exact"}]
+        self.transport.return_value = {"id": "mock-zinc-id", "status": "order_placed", "items": [item], "tracking_numbers": packages}
+        await self.engine.refresh_batch_zinc(batch["id"], ZincClient(None, "zn_test_fake"))
+        self.assertFalse(self.hass.data["shopping_list"].items[-1]["complete"])
+        self.assertNotIn("delivery_confirmed_at", saved)
+        packages[1]["status"] = "delivered"
+        packages[1]["item_mapping"] = "inferred"
+        await self.engine.refresh_batch_zinc(batch["id"], ZincClient(None, "zn_test_fake"))
+        self.assertFalse(self.hass.data["shopping_list"].items[-1]["complete"])
+        packages[1]["item_mapping"] = "exact"
+        await self.engine.refresh_batch_zinc(batch["id"], ZincClient(None, "zn_test_fake"))
+        self.assertTrue(self.hass.data["shopping_list"].items[-1]["complete"])
+        self.assertIn("delivery_confirmed_at", saved)
+        from custom_components.reorder.frontend import panel_data
+        self.assertTrue(panel_data(self.engine, self.entry)["batches"][0]["orders"][0]["delivery_confirmed"])
+        count = self.transport.await_count
+        await self.engine.refresh_pending_batches(ZincClient(None, "zn_test_fake"), "sandbox")
+        self.assertEqual(count, self.transport.await_count)
 
     async def test_missing_shipping_address_blocks_submission(self):
         batch = await self.prepare()
@@ -1593,6 +1789,31 @@ class DashboardConfigTest(unittest.TestCase):
 
 
 class FulfillmentDataTest(unittest.TestCase):
+    def test_exact_delivery_mapping_rejects_inferred_missing_conflicting_and_failed_lines(self):
+        from custom_components.reorder.fulfillment import fulfillment_snapshot, item_delivery_confirmed
+        response = {"items": [{"id": "item-1", "url": "https://example.com/item", "quantity": 1,
+                               "status": "ordered", "tracking_number_ids": ["package-1"]}],
+                    "tracking_numbers": [{"id": "package-1", "status": "delivered",
+                                          "order_item_ids": ["item-1"], "item_mapping": "exact"}]}
+        snapshot = fulfillment_snapshot(response)
+        self.assertTrue(item_delivery_confirmed(snapshot["items"][0], snapshot))
+        for change in (dict(item_mapping="inferred"), dict(order_item_ids=None),
+                       dict(status="in_transit"), dict(id="other-package")):
+            altered = deepcopy(snapshot)
+            altered["shipments"][0].update(change)
+            self.assertFalse(item_delivery_confirmed(altered["items"][0], altered))
+        for status in ("failed", "skipped", "cancelled"):
+            altered = deepcopy(snapshot)
+            altered["items"][0]["status"] = status
+            self.assertFalse(item_delivery_confirmed(altered["items"][0], altered))
+        altered = deepcopy(snapshot)
+        altered["items"].append(deepcopy(altered["items"][0]))
+        self.assertFalse(item_delivery_confirmed(altered["items"][0], altered))
+        altered = deepcopy(snapshot)
+        altered["shipments"].append(deepcopy(altered["shipments"][0]))
+        self.assertFalse(item_delivery_confirmed(altered["items"][0], altered))
+
+
     def test_duplicate_product_mapping_never_authorizes_list_completion(self):
         from custom_components.reorder.fulfillment import fulfillment_snapshot, receipt_eligible
         saved = order() | {"shopping_item_id": "source", "zinc_environment": "sandbox", "zinc_order_id": "mock"}

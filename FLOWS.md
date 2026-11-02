@@ -1,4 +1,4 @@
-# Shopping List and configuration flows (v0.7.0)
+# Shopping List and configuration flows (v0.8.0)
 
 Reorder watches Home Assistant's built-in Shopping List. Adds and updates only create
 or change **local** work; they never submit a purchase. Synchronization is on by default
@@ -46,10 +46,11 @@ not guess that all items were removed. It blocks linked submissions until list s
 can be verified. The adapter supports both the older shared Shopping List data and
 newer config-entry runtime data. Other to-do providers are not automatically monitored.
 
-There is no automatic replay of all list contents on startup, and Reorder does not
-remove/check off Shopping List entries after a purchase. Changes made while Reorder
-was stopped may require a fresh edit or manual local cancellation; submission checks
-still guard stale linked work. Synchronization settings apply to subsequent list edits.
+Every 15 minutes, Reorder reconciles the current native list to recover missed adds,
+edits, completion and removal after downtime. Previously blocked open entries can
+queue once their active-order/cooldown blocker clears. Missing/unavailable source state
+never cancels everything. Confirmed delivered batch lines can check off original IDs;
+see [the ordering guide](ORDERING.md).
 Turning synchronization off keeps local work until you manage it explicitly and turns
 off the source-state submission check. Purchasing confirmations and idempotency stay on.
 
@@ -82,7 +83,8 @@ validation errors keep the draft for correction.
 ## Preferences in the sidebar
 
 **Reorder → Settings** manages manual/weekly/rolling batch preparation, weekday, hour
-in Home Assistant's local timezone, rolling window, and Shopping List synchronization.
+in Home Assistant's local timezone, rolling window, source-change synchronization,
+and the independent automatic delivery-completion preference.
 Schedules prepare batches only; they never submit purchases. Saving unchanged schedule
 values preserves the last scheduled date; a real schedule change resets that date.
 
@@ -102,11 +104,12 @@ Frontend tests validate payloads, drafts and audit display; Chromium smoke tests
 product create/edit/disable/remove, schedule/preferences saving, validation errors and
 mobile rendering with synthetic local fixtures. No Zinc transactions are needed.
 
-## Order/receipt stage (v0.7.0)
+## Order/receipt stage (v0.8.0)
 
 The new [ordering guide](ORDERING.md) adds sandbox-only UI submission and explicit
 per-line receipt/list completion. These are separate from source-change synchronization:
-placement and refresh never check off items automatically. Completion uses exact source
+placement never checks off items; confirmed delivered lines are automatically completed
+by default, with an independent Settings switch for manual receipt. Completion uses exact source
 IDs and skips renamed/missing lines; partial failures remain open. Provider delivery or
 an explicit recorded receipt permits a fresh request only after cooldown, while the old
 source ID and attempted submission remain protected against replay.

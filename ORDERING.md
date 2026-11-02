@@ -1,8 +1,8 @@
-# Sandbox ordering, tracking, and Shopping List receipt (v0.7.0)
+# Sandbox ordering, tracking, and Shopping List receipt (v0.8.0)
 
 The sidebar now supports the next stage of the workflow: explicitly submit a **sandbox**
-batch, retrieve item/fulfillment/tracking details, and deliberately complete selected
-linked Shopping List items. The app still has **no live-purchase control**. Existing
+batch, retrieve item/fulfillment/tracking details, and automatically check off linked Shopping List items after confirmed per-item delivery.
+Explicit selected receipt remains available for testing or manual management. The app still has **no live-purchase control**. Existing
 manual live actions retain their original opt-in and confirmation safeguards.
 
 ## Success-path test
@@ -67,13 +67,22 @@ raw error text, payment details and arbitrary job-result payloads are excluded.
 
 The API's overall `order_placed` state is preserved. Per-item statuses and shipment
 statuses are shown separately. A delivered package alone is not used to guess that
-all lines arrived. Matching must be unique by saved URL and quantity; duplicate or
-canonicalized/mismatched URLs may require manual reconciliation. No automatic polling
-or webhook endpoint is added in this release: provider updates require Refresh.
+all lines arrived. Delivery requires an explicit delivered item or exact package-to-item links with all
+known packages for that line delivered. Inferred/unknown links, missing referenced
+packages, contradictory links, failed lines, or a partly delivered split shipment stay
+open. Safe package/item IDs and mapping confidence are retained for this check.
+Matching must be unique by saved URL and quantity; duplicate or
+canonicalized/mismatched URLs may require manual reconciliation. Tracked batches refresh every 15 minutes, at most ten per pass with rotating selection.
+Only GET status requests are made; no webhook endpoint is added. Refresh remains
+available for immediate checks. Fully resolved batches stop polling; unavailable lists
+or failed list updates remain retryable. Only the current key’s environment is polled.
+Read-only polling does not require shipping details or permission to place live orders.
+Legacy standalone orders still use their existing manual refresh action.
 
 For existing manually submitted **live** orders, list completion is available only
-for uniquely matched, explicitly provider-delivered items, with matching configured
-live mode and the separate **ITEMS RECEIVED** confirmation. It never submits a purchase.
+automatically for uniquely matched, explicitly provider-delivered batch items.
+Manual receipt additionally requires matching configured live mode and the separate
+**ITEMS RECEIVED** confirmation. It never submits a purchase.
 A partial/failed aggregate order can still have a confirmed delivered line, but failed
 or skipped lines are never made eligible. No real credentials or purchases are needed
 to validate the sandbox flow.
@@ -82,8 +91,16 @@ to validate the sandbox flow.
 
 - Completion targets item IDs through Home Assistant's built-in To-do service, not
   names. Duplicate names, renamed and removed source entries are not guessed or cleared.
-- Order placement, tracking appearance and refresh never check off list items on their
-  own. The explicit receipt confirmation is required, even for provider-delivered lines.
+- Order placement and shipment tracking alone never check off list items. With the
+  default **Automatically check off linked list items after confirmed delivery** setting,
+  a refreshed, uniquely matched delivered line completes its original list ID through
+  the native To-do service. The item leaves the active list but remains in completed
+  history; no list entries are deleted. Turn this setting off for manual receipt.
+- Sandbox `delivered` results are simulated delivery; ordered/shipped sandbox lines
+  still require **SIMULATE RECEIPT** to test list completion early.
+- Once completion has been recorded, later refreshes never re-complete an entry you
+  deliberately uncheck. Add a fresh list entry for a new request. Repeated receipt
+  actions do not reset the original cooldown timestamp.
 - A list update can partly succeed before another line or the local metadata save fails.
   Reload/check the list before retrying. Already-complete IDs are recognized without
   repeating any purchase; the app reports completed vs skipped/failed counts.
@@ -97,3 +114,20 @@ to validate the sandbox flow.
 Store additions are backward compatible. Existing batches can be refreshed to populate
 these details; no data deletion/migration is required. Submission and repeat-purchase
 checks still occur on the server immediately before the network request.
+
+## List reconciliation and recovery (v0.8.0)
+
+The 15-minute pass also reads the native list to recover missed additions, edits,
+completion and removals after downtime. Source synchronization must be enabled to
+reconcile edits/removals; delivery completion has its own independent setting. Missing
+source state is never treated as an empty list. Pending unmatched or blocked entries
+are retried locally on subsequent passes (for example, after cooldown or catalog setup),
+without reviving manually canceled or submitted work or making any purchase.
+
+Refresh/list synchronization errors appear inline. Delivery is persisted before the list
+update, so a list or metadata-save error cannot revert a placed/delivered provider result.
+If the source update succeeded before metadata failed, the next refresh recognizes the
+already-complete ID and records it without another purchase. Removed/renamed entries
+and ambiguous product matches stay untouched. A new same-name list ID is never cleared
+by an earlier purchase. Polling cannot recover an uncertain submission without a Zinc ID;
+that still needs dashboard reconciliation.

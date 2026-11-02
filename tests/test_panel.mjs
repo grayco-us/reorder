@@ -145,7 +145,7 @@ test("settings form sends schedule and synchronization preferences only", () => 
   view._manage = (...args) => calls.push(args);
   view._submit({ preventDefault() {}, target: { dataset: { form: "preferences" } } });
   assert.equal(calls[0][0], "reorder/preferences_save");
-  assert.deepEqual(calls[0][1].preferences, { strategy: "weekly", weekday: 1, hour: 12, rolling_hours: 24, sync_shopping_list: false });
+  assert.deepEqual(calls[0][1].preferences, { strategy: "weekly", weekday: 1, hour: 12, rolling_hours: 24, sync_shopping_list: false, auto_complete_delivered: true });
 });
 
 test("failed product saves preserve the draft and surface the validation message", async () => {
@@ -236,3 +236,14 @@ test("tracking and partial failures are visible with escaped safe links and pric
   assert.match(html, /TEST&lt;123&gt;/);
   assert.doesNotMatch(html, /href="javascript:/);
 });
+
+ test("delivery synchronization preference and retry notices are visible", () => {
+  const view = panel();
+  assert.match(view._settingsPage(), /Automatically check off linked list items after confirmed delivery/);
+  assert.match(view._fulfillment({refresh_error: true, list_sync_error: true}), /Delivery was saved/);
+  view._preferencesDraft = {strategy: "manual", weekday: 6, hour: 10, rolling_hours: 48, sync_shopping_list: true, auto_complete_delivered: false};
+  const calls = [];
+  view._manage = (...args) => calls.push(args);
+  view._submit({preventDefault() {}, target: {dataset: {form: "preferences"}}});
+  assert.equal(calls[0][1].preferences.auto_complete_delivered, false);
+ });

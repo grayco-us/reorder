@@ -1,4 +1,4 @@
-# Reorder sidebar app (v0.7.0)
+# Reorder sidebar app (v0.8.0)
 
 Reorder now bundles its own responsive frontend and automatically adds **Reorder**
 to Home Assistant's sidebar. There is no dashboard YAML to paste, no resource URL
@@ -52,8 +52,9 @@ retained. No batch migration or API-key re-entry is required.
 Ready sandbox batches now have a typed-confirmation submission control. The backend
 requires a test key independently of the browser. There is no live-purchase button;
 manual live actions retain their existing safeguards. See [the ordering guide](ORDERING.md)
-for item outcomes, tracking and explicit receipt/list updates. No automatic retry,
-purchasing schedule, carrier polling, or retailer cancellation behavior is added.
+for item outcomes, periodic Zinc status checks and delivery/list synchronization.
+Purchases are never retried or scheduled automatically. Reorder does not poll carriers
+directly or cancel retailer orders.
 
 Selection belongs to each browser panel, so two users/browsers can review different
 batches without changing one another's selection. It resets when the panel is recreated.
@@ -71,7 +72,7 @@ are stored by the browser component. Product text is escaped and links permit HT
 without embedded usernames/passwords only.
 
 Local changes are reflected through Reorder update events. Refreshing a provider order
-is an explicit button action. Action errors appear inline, while saved state remains
+also runs every 15 minutes for tracked batches; the button checks immediately. Action errors appear inline, while saved state remains
 available for review; uncertain submissions are clearly marked for reconciliation.
 If frontend registration fails, the integration logs the error and keeps its existing
 entities and actions working. A conflicting `/reorder-app` panel is not overwritten.
@@ -139,10 +140,11 @@ purchases are never canceled by a list edit. The app shows **Needs fresh review*
 the historical canceled/returned lines. Products and Settings are available as new
 app pages after deployment/restart and a browser refresh; no dashboard import is needed.
 
-## Order stage (v0.7.0)
+## Order stage (v0.8.0)
 
 See [Sandbox ordering and receipt](ORDERING.md) for the full walkthrough. A ready batch
 in Sandbox mode can be submitted after a typed confirmation. Tracking, item failures,
 partial fulfillment and reported totals appear after refresh. Explicit selected receipt
-can check off exact linked list IDs; placement never implies delivery or automatic list
-cleanup. Missing/mismatched provider details disable automated list completion.
+can check off exact linked list IDs. Confirmed delivered lines now complete their
+original list IDs automatically by default; placement never implies delivery. Settings
+provides an independent switch to keep receipt manual. Missing/mismatched provider details disable automated list completion.

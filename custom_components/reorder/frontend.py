@@ -13,7 +13,7 @@ from homeassistant.loader import async_get_integration
 from .batch import batch_status_label, preview, review_batch
 from .const import DOMAIN
 from .core import norm
-from .fulfillment import mapped_item, receipt_eligible
+from .fulfillment import mapped_item, receipt_eligible, item_delivery_confirmed
 from .shopping import shopping_items
 from .product_config import PRODUCT_SCHEMA, PREFERENCES_SCHEMA
 
@@ -36,7 +36,7 @@ def panel_data(engine, entry):
     current_items = shopping_items(engine.hass)
     current_by_id = {str(item["id"]): item for item in current_items or []}
     fields = ("id", "status", "created_at", "max_price", "zinc_environment",
-              "zinc_order_id", "last_refreshed_at", "canceled_at", "invalidated_at", "fulfillment", "receipt_results", "submission_error_code")
+              "zinc_order_id", "last_refreshed_at", "canceled_at", "invalidated_at", "fulfillment", "receipt_results", "submission_error_code", "refresh_error", "list_sync_error")
     for batch in sorted(engine.store.data.get("batches", {}).values(),
                         key=lambda item: item["created_at"], reverse=True):
         item = {field: deepcopy(batch[field]) for field in fields if field in batch}
@@ -67,6 +67,7 @@ def panel_data(engine, entry):
                 continue
             provider = mapped_item(original, batch.get("fulfillment", {}), raw_orders)
             order["provider_item"] = deepcopy(provider)
+            order["delivery_confirmed"] = item_delivery_confirmed(provider, batch.get("fulfillment", {}))
             current = current_by_id.get(original.get("shopping_item_id"))
             labels = {norm(original["name"]), norm(original.get("shopping_item_name", original["name"]))}
             list_status = ("not_linked" if not original.get("shopping_item_id") else "unavailable" if current_items is None
@@ -85,7 +86,8 @@ def panel_data(engine, entry):
                                    engine.hass.config_entries.async_entries("shopping_list")),
         "intake_events": deepcopy(engine.intake_events),
         "preferences": {**engine.store.data.get("batch_settings", {}),
-                        "sync_shopping_list": engine.store.data.get("preferences", {}).get("sync_shopping_list", True)},
+                        "sync_shopping_list": engine.store.data.get("preferences", {}).get("sync_shopping_list", True),
+                        "auto_complete_delivered": engine.store.data.get("preferences", {}).get("auto_complete_delivered", True)},
         "catalog": [{**{field: product.get(field, [] if field in ("aliases", "substitutes") else None)
                          for field in ("name", "aliases", "retailer", "product_id", "quantity", "max_price", "cooldown_hours", "enabled", "substitutes")},
                      "can_rename": not any(order["product_key"] == key for order in engine.store.data["orders"].values())}

@@ -36,6 +36,7 @@ PREFERENCES_SCHEMA = vol.Schema({
     vol.Required("hour"): vol.All(vol.Coerce(int), vol.Range(min=0, max=23)),
     vol.Required("rolling_hours"): vol.All(vol.Coerce(int), vol.Range(min=1, max=336)),
     vol.Optional("sync_shopping_list", default=True): cv.boolean,
+    vol.Optional("auto_complete_delivered"): cv.boolean,
 })
 
 

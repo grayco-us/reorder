@@ -201,6 +201,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         return report
 
     async def check_scheduled(_now):
+        # Reconcile missed events after restarts, and retry requests blocked by cooldown.
+        try:
+            await engine.reconcile_shopping_list()
+        except Exception:
+            _LOGGER.warning("Shopping List reconciliation failed; local work remains protected")
+        key = entry.options.get("zinc_api_key", "")
+        if key.startswith(("zn_test_", "zn_live_")):
+            # GET-only status tracking does not need an address or permission to purchase.
+            await engine.refresh_pending_batches(ZincClient(async_get_clientsession(hass), key),
+                "sandbox" if key.startswith("zn_test_") else "live")
         settings = store.data.get("batch_settings", {})
         if scheduled_due(store.data, dt_util.utcnow(), hass.config.time_zone):
             # Only prepare a batch, NEVER submit or spend funds on a schedule.
