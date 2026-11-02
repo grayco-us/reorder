@@ -294,3 +294,60 @@ test("tracking and partial failures are visible with escaped safe links and pric
   assert.equal(view._preferencesDraft.strategy, "weekly");
   assert.equal(view._notificationDraft, null);
  });
+
+ test("live review requires opt-in mode, reviewed contents, exact phrase and a bound seal", async () => {
+  const view = panel(), calls = [];
+  const batch = view._data.batches[0];
+  view._data.mode = "Live enabled";
+  batch.can_submit_live = true;
+  batch.review_token = "reviewed-seal";
+  view._confirmLive = batch.id;
+  view._liveReviewToken = batch.review_token;
+  view._livePhrase = "PLACE LIVE ORDER";
+  view._hass.callWS = async message => {calls.push(message); return message.type === "reorder/panel" ? view._data : {};};
+  await view._submitLive();
+  assert.equal(calls.length, 0);
+  view._liveReviewed = true;
+  await view._submitLive();
+  assert.equal(calls[0].type, "reorder/live_submit");
+  assert.equal(calls[0].review_token, "reviewed-seal");
+  assert.equal(calls[0].confirmation, "PLACE LIVE ORDER");
+  assert.doesNotMatch(JSON.stringify(calls), /call_service/);
+  assert.equal(view._confirmLive, null);
+  assert.equal(view._liveReviewed, false);
+ });
+
+ test("live review closes when the server changes its seal", async () => {
+  const view = panel();
+  view._data.mode = "Live enabled";
+  const batch = view._data.batches[0];
+  batch.can_submit_live = true;
+  batch.review_token = "new-seal";
+  view._confirmLive = batch.id;
+  view._liveReviewed = true;
+  view._livePhrase = "PLACE LIVE ORDER";
+  view._liveReviewToken = "old-seal";
+  view._hass.callWS = async () => view._data;
+  await view._load();
+  assert.equal(view._confirmLive, null);
+  assert.equal(view._liveReviewed, false);
+  assert.match(view._notice, /changed/);
+ });
+
+ test("live review cannot send from disabled mode or with an old local seal", async () => {
+  const view = panel();
+  const batch = view._data.batches[0];
+  batch.can_submit_live = true;
+  batch.review_token = "current-seal";
+  view._confirmLive = batch.id;
+  view._liveReviewed = true;
+  view._livePhrase = "PLACE LIVE ORDER";
+  view._liveReviewToken = "current-seal";
+  view._data.mode = "Live disabled";
+  view._hass.callWS = () => {throw new Error("must not send");};
+  await view._submitLive();
+  assert.doesNotMatch(view._orderControls(batch), /data-open-live/);
+  view._data.mode = "Live enabled";
+  view._liveReviewToken = "stale-seal";
+  await view._submitLive();
+ });

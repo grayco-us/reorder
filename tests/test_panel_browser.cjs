@@ -157,8 +157,37 @@ const { chromium } = require('playwright');
     assert.equal(await page.evaluate(() => document.querySelector('reorder-panel').shadowRoot.querySelector('main').scrollWidth <= 390), true);
     await page.getByRole('heading', {name: 'Notifications', exact: true}).scrollIntoViewIfNeeded();
     await page.screenshot({path: path.join(artifacts, 'reorder-notifications-mobile.png'), fullPage: true});
+    await page.setViewportSize({width: 1440, height: 1000});
+    await page.evaluate(() => {
+      const batch = structuredClone(window.snapshot.batches.find(item => item.id === 'prepared-in-app'));
+      Object.assign(batch, {id: 'live-fixture', status: 'ready', status_label: 'Ready for review', can_submit_live: true, can_submit_sandbox: false, can_cancel: true, can_refresh: false, review_token: 'fixture-live-review'});
+      delete batch.zinc_environment;
+      delete batch.zinc_order_id;
+      delete batch.last_refreshed_at;
+      delete batch.fulfillment;
+      for (const order of batch.orders) {order.provider_item = null; order.shopping_list_status = 'pending';}
+      window.snapshot.batches.unshift(batch);
+      window.snapshot.mode = 'Live enabled';
+    });
+    await page.getByRole('button', {name: 'Reload', exact: true}).click();
+    await page.getByRole('button', {name: /^Batches/}).click();
+    await page.getByRole('button', {name: /Ready for review/}).first().click();
+    await page.getByRole('button', {name: 'Review live order', exact: true}).click();
+    assert.equal(await page.getByRole('button', {name: 'Place live order', exact: true}).isDisabled(), true);
+    await page.getByLabel('Type PLACE LIVE ORDER to confirm', {exact: true}).fill('PLACE LIVE ORDER');
+    assert.equal(await page.getByRole('button', {name: 'Place live order', exact: true}).isDisabled(), true);
+    await page.getByLabel('I checked the saved products, quantities and combined spending limit.', {exact: true}).check();
+    await page.screenshot({path: path.join(artifacts, 'reorder-live-review.png'), fullPage: true});
+    await page.setViewportSize({width: 390, height: 1100});
+    assert.equal(await page.evaluate(() => document.querySelector('reorder-panel').shadowRoot.querySelector('main').scrollWidth <= 390), true);
+    await page.screenshot({path: path.join(artifacts, 'reorder-live-review-mobile.png'), fullPage: true});
+    await page.setViewportSize({width: 1440, height: 1000});
+    await page.getByRole('button', {name: 'Place live order', exact: true}).click();
+    await page.getByRole('status').filter({hasText: 'Live submission accepted.'}).waitFor();
+    assert.equal(await page.evaluate(() => window.reorderCalls.filter(call => call.type === 'reorder/live_submit').length), 1);
+    assert.equal(await page.evaluate(() => window.snapshot.batches.find(batch => batch.id === 'live-fixture').status), 'pending');
     assert.deepEqual(errors, []);
-    console.log('PASS: desktop/mobile rendering, inline review, button eligibility, refresh, explicit local cancellation, queue preparation, errors, and escaped product text; sandbox gateway only; no live purchase calls.');
+    console.log('PASS: desktop/mobile rendering, inline review, button eligibility, refresh, explicit local cancellation, queue preparation, errors, and escaped product text; mocked Sandbox/live gateways; no actual provider requests.');
     console.log('Screenshots: ' + artifacts + '/reorder-sidebar-{desktop,mobile}.png');
   } finally { await browser.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

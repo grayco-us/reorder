@@ -14,6 +14,7 @@ from .shopping import shopping_items
 from .const import DOMAIN
 from .store import ReorderStore
 from .core import ReorderEngine
+from .review import review_matches
 from .zinc import ZincClient
 from .batch import batch_status_label, cancel_batch, create_batch, preview, review_batch, scheduled_due
 from homeassistant.helpers.event import async_track_time_interval
@@ -179,6 +180,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         client, address, sandbox = zinc_settings()
         if call.data["confirmation"] != ("SANDBOX" if sandbox else "PLACE LIVE ORDER"):
             raise HomeAssistantError("Explicit confirmation phrase required")
+        if "review_token" in call.data and not review_matches(engine, entry, call.data["batch_id"], call.data["review_token"]):
+            raise HomeAssistantError("Review changed or expired. Reload and review saved contents and connection settings again; no order was submitted.")
         try:
             report = await engine.submit_batch_zinc(call.data["batch_id"], client, address, sandbox)
         except ValueError as err:
@@ -245,7 +248,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         vol.Required("batch_id"): cv.string}),
         supports_response=SupportsResponse.OPTIONAL)
     hass.services.async_register(DOMAIN, "submit_batch_zinc", submit_batch, schema=vol.Schema({
-        vol.Required("batch_id"): cv.string, vol.Required("confirmation"): cv.string}),
+        vol.Required("batch_id"): cv.string, vol.Required("confirmation"): cv.string,
+        vol.Optional("review_token"): cv.string}),
         supports_response=SupportsResponse.OPTIONAL)
     hass.services.async_register(DOMAIN, "refresh_batch_zinc", refresh_batch, schema=vol.Schema({
         vol.Required("batch_id"): cv.string}),

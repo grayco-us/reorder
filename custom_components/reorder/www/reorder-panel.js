@@ -14,7 +14,7 @@ const css = `
 :host{display:block;height:100%;overflow:auto;background:var(--primary-background-color,#f5f7fa);color:var(--primary-text-color,#172033);font-family:var(--paper-font-body1_-_font-family,system-ui,sans-serif)}
 *{box-sizing:border-box}button,a{font:inherit}button{cursor:pointer}button:disabled{cursor:not-allowed;opacity:.5}button:focus-visible,a:focus-visible{outline:3px solid var(--primary-color,#3876be);outline-offset:3px}
 header{display:flex;align-items:center;gap:14px;padding:18px 24px;background:var(--card-background-color,#fff);border-bottom:1px solid var(--divider-color,#e3e8ef)}header h1{font-size:22px;margin:0;letter-spacing:-.5px}.grow{flex:1}.menu{border:0;background:none;font-size:24px;padding:0 6px;color:inherit}.settings{color:var(--primary-color,#3876be);text-decoration:none;font-weight:600}
-.check{overflow-wrap:anywhere}main{max-width:1440px;margin:auto;padding:26px}.top{display:flex;align-items:end;justify-content:space-between;gap:20px;margin-bottom:22px}h2{margin:0;font-size:26px;letter-spacing:-.6px}p{color:var(--secondary-text-color,#69758a);line-height:1.5}.top p{margin:6px 0 0}.badge{display:inline-flex;border-radius:999px;padding:5px 10px;font-size:12px;font-weight:650;background:var(--secondary-background-color,#eef2f7);white-space:nowrap}.sandbox{color:var(--success-color,#287951);border:1px solid currentColor}.live{color:var(--warning-color,#a65f00);border:1px solid currentColor}
+.check{overflow-wrap:anywhere}.confirm label{display:block;margin:12px 0}.confirm input:not([type="checkbox"]){display:block;width:100%;box-sizing:border-box;padding:10px;border:1px solid var(--divider-color,#dbe2eb);border-radius:8px;background:var(--card-background-color,#fff);color:inherit;margin-top:6px}main{max-width:1440px;margin:auto;padding:26px}.top{display:flex;align-items:end;justify-content:space-between;gap:20px;margin-bottom:22px}h2{margin:0;font-size:26px;letter-spacing:-.6px}p{color:var(--secondary-text-color,#69758a);line-height:1.5}.top p{margin:6px 0 0}.badge{display:inline-flex;border-radius:999px;padding:5px 10px;font-size:12px;font-weight:650;background:var(--secondary-background-color,#eef2f7);white-space:nowrap}.sandbox{color:var(--success-color,#287951);border:1px solid currentColor}.live{color:var(--warning-color,#a65f00);border:1px solid currentColor}
 .tabs,.filters,.actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.tabs{overflow-x:auto;flex-wrap:nowrap;border-bottom:1px solid var(--divider-color,#e3e8ef);margin-bottom:22px}.tab{white-space:nowrap;border:0;border-bottom:3px solid transparent;border-radius:0;padding:12px 14px;background:none;color:var(--secondary-text-color,#69758a)}.tab.active{border-bottom-color:var(--primary-color,#3876be);color:var(--primary-color,#3876be);font-weight:700}.count{font-size:12px;margin-left:7px}.layout{display:grid;grid-template-columns:minmax(270px,340px) minmax(0,1fr);gap:22px;align-items:start}
 .card{background:var(--card-background-color,#fff);border:1px solid var(--divider-color,#e3e8ef);border-radius:16px;overflow:hidden}.card-head{padding:20px;border-bottom:1px solid var(--divider-color,#e3e8ef)}h3{font-size:17px;margin:0 0 12px}.filters button,.secondary{border:1px solid var(--divider-color,#dbe2eb);background:var(--card-background-color,#fff);color:inherit;border-radius:9px;padding:9px 13px}.filters button{font-size:12px;padding:6px 10px}.filters .active{background:var(--primary-color,#3876be);border-color:var(--primary-color,#3876be);color:var(--text-primary-color,#fff)}.batch{display:block;width:100%;text-align:left;background:none;color:inherit;border:0;border-bottom:1px solid var(--divider-color,#e3e8ef);padding:17px 20px}.batch:last-child{border-bottom:0}.batch.selected{background:var(--secondary-background-color,#edf3fb);box-shadow:inset 3px 0 var(--primary-color,#3876be)}.batch strong{display:block;font-size:14px;margin-bottom:7px}.batch small{display:block;color:var(--secondary-text-color,#69758a);margin-top:8px;font-size:12px}.batch .row{display:flex;justify-content:space-between;align-items:center;gap:10px}.batch .price{font-size:13px;font-weight:650}.empty{padding:36px 24px;text-align:center}.empty h3{margin-bottom:8px}.empty p{margin:0}.details{padding:24px}.detail-top{display:flex;justify-content:space-between;align-items:start;gap:14px;margin-bottom:16px}.eyebrow{font-size:12px;color:var(--secondary-text-color,#69758a);margin:0 0 7px}.details h3{font-size:24px;letter-spacing:-.5px;margin:0}.meta{display:flex;gap:8px 22px;flex-wrap:wrap;font-size:12px;color:var(--secondary-text-color,#69758a);margin:14px 0 20px}.actions{margin-bottom:22px}.primary{border:0;border-radius:9px;padding:11px 16px;background:var(--primary-color,#3876be);color:var(--text-primary-color,#fff);font-weight:650}.danger{color:var(--error-color,#b43d3d)}.table-scroll{overflow-x:auto}table{border-collapse:collapse;width:100%;font-size:14px}th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.7px;color:var(--secondary-text-color,#69758a);font-weight:650}th,td{padding:14px 10px;border-bottom:1px solid var(--divider-color,#e3e8ef)}th:first-child,td:first-child{padding-left:0}th:last-child,td:last-child{text-align:right;padding-right:0}.quantity{text-align:center;width:75px}td a{color:var(--primary-text-color,#172033);text-decoration:none;font-weight:600}td a:hover{text-decoration:underline}svg.external{width:12px;height:12px;margin-left:6px;vertical-align:-1px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linejoin:round}td small{display:block;margin-top:5px;color:var(--secondary-text-color,#69758a);font-size:11px}.total{display:flex;justify-content:space-between;align-items:center;margin-top:20px;font-size:14px}.total strong{font-size:24px;letter-spacing:-.5px}.hint{font-size:12px;margin:8px 0 0}.notice{padding:13px 16px;border-radius:10px;margin-bottom:18px;border:1px solid var(--divider-color,#dbe2eb);font-size:14px;line-height:1.5}.error{border-color:var(--error-color,#b43d3d);color:var(--error-color,#b43d3d)}.confirm{border-color:var(--warning-color,#a65f00);margin:16px 0}.confirm p{margin:6px 0 12px}.confirm .actions{margin:0}.queue{padding:24px}.queue .actions{margin:20px 0 0}.footer{font-size:12px;color:var(--secondary-text-color,#69758a);margin-top:20px}.loading{padding:50px;text-align:center}
 .form-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.form-grid label{display:flex;flex-direction:column;gap:7px;font-size:13px;font-weight:600}.form-grid input,.form-grid select{width:100%;padding:10px;border:1px solid var(--divider-color,#dbe2eb);border-radius:8px;background:var(--card-background-color,#fff);color:inherit;font:inherit}.form-grid input:disabled{opacity:.65}.form-grid .wide{grid-column:1/-1}.form-grid .check{flex-direction:row;align-items:center;font-weight:400}.form-grid .check input{width:auto}.product-row{padding:18px 0;border-bottom:1px solid var(--divider-color,#e3e8ef)}.product-row:last-child{border:0}.product-row h3{margin-bottom:6px}.product-row .actions{margin:12px 0 0}.editor{margin-top:22px;padding-top:22px;border-top:1px solid var(--divider-color,#e3e8ef)}
@@ -35,6 +35,10 @@ export class ReorderPanel extends HTMLElement {
     this._confirmCancel = null;
     this._confirmSubmit = null;
     this._sandboxPhrase = "";
+    this._confirmLive = null;
+    this._livePhrase = "";
+    this._liveReviewed = false;
+    this._liveReviewToken = null;
     this._confirmReceipt = null;
     this._receiptPhrase = "";
     this._receiptOrderIds = [];
@@ -85,6 +89,16 @@ export class ReorderPanel extends HTMLElement {
       if (generation !== this._generation || sequence !== this._loadSequence) return;
       this._data = data;
       if (this._confirmSubmit && !data.batches.find(batch => batch.id === this._confirmSubmit)?.can_submit_sandbox) this._confirmSubmit = null;
+      if (this._confirmLive) {
+        const current = data.batches.find(batch => batch.id === this._confirmLive);
+        if (!current?.can_submit_live || current.review_token !== this._liveReviewToken) {
+          this._confirmLive = null;
+          this._livePhrase = "";
+          this._liveReviewed = false;
+          this._liveReviewToken = null;
+          this._notice = "Batch or connection changed. Review the saved contents again before placing an order.";
+        }
+      }
       if (this._confirmReceipt) {
         const eligible = data.batches.find(batch => batch.id === this._confirmReceipt)?.receivable_order_ids || [];
         this._receiptOrderIds = this._receiptOrderIds.filter(id => eligible.includes(id));
@@ -116,9 +130,9 @@ export class ReorderPanel extends HTMLElement {
   _guidance() {
     const mode = this._data.mode;
     const message = mode === "Live enabled"
-      ? "Live purchasing is enabled. The native submit action can spend real money with PLACE LIVE ORDER. This app reviews and tracks live batches; its submit button is Sandbox only. Turning live purchasing off prevents new submissions but keeps read-only batch tracking."
+      ? "Live purchasing is enabled. Placing a live order can spend real money. Review a ready batch, acknowledge its saved products and spending limit, then type PLACE LIVE ORDER to submit once. Turning live purchasing off prevents new submissions but keeps read-only batch tracking."
       : mode === "Live disabled"
-      ? "A live key is configured, but new live purchases are disabled. Existing live batches still receive periodic read-only status updates; manual Refresh is disabled until live purchasing is enabled. To run a live trial, enable live purchasing in Connection and use the separately confirmed native submit action."
+      ? "A live key is configured, but new live purchases are disabled. Existing live batches still receive periodic read-only status updates; manual Refresh is disabled until live purchasing is enabled. To run a live trial, enable live purchasing in Connection, then review a ready batch and use its separate live confirmation."
       : mode === "Sandbox"
       ? "Sandbox mode: orders and delivery results are simulated. Receipt simulation changes your real Home Assistant Shopping List. Switching to a live key does not convert Sandbox history into live orders."
       : "Configure a Zinc key in Connection before ordering. Adding list items and preparing batches only save local work.";
@@ -146,11 +160,12 @@ export class ReorderPanel extends HTMLElement {
   }
   _orderControls(batch) {
     const submit = this._confirmSubmit === batch.id ? `<form class="notice confirm" data-form="sandbox_submit"><h3>Submit this sandbox batch?</h3><p>${batch.orders.length} saved product line(s), spending ceiling ${this._money(batch.max_price)}. This sends one simulated order to Zinc using the configured test key.</p>${this._field("Type SANDBOX to confirm", "confirmation", this._sandboxPhrase, { required: true })}<div class="actions" style="margin-top:12px"><button class="secondary" type="button" data-close-submit>Keep reviewing</button><button class="primary" type="submit" ${this._busy || this._sandboxPhrase !== "SANDBOX" ? "disabled" : ""}>Confirm sandbox submission</button></div></form>` : "";
+    const live = this._confirmLive === batch.id ? `<form class="notice confirm" data-form="live_submit"><h3>Place a real order?</h3><p><strong>This can spend real money.</strong> Live batch ${escapeHTML(batch.id)} contains ${batch.orders.length} saved product line(s). Combined USD spending limit: <strong>${this._money(batch.max_price)}</strong>, including tax and shipping. This is one order cap, not a quote or separate per-product caps. Check the saved URLs, pack sizes and quantities below; also review your delivery details in Connection.</p><label class="check"><input type="checkbox" name="live_reviewed" ${this._liveReviewed ? "checked" : ""}>I checked the saved products, quantities and combined spending limit.</label>${this._field("Type PLACE LIVE ORDER to confirm", "confirmation", this._livePhrase, {required: true})}<div class="actions" style="margin-top:12px"><button class="secondary" type="button" data-close-live>Keep reviewing</button><button class="primary" type="submit" ${this._busy || this._livePhrase !== "PLACE LIVE ORDER" || !this._liveReviewed ? "disabled" : ""}>Place live order</button></div><p class="hint">Submit once. If the result is uncertain, check saved status and Zinc before any further purchase. Closing this form does not cancel an already submitted retailer order.</p></form>` : "";
     const eligible = batch.receivable_order_ids || [];
     const simulation = batch.zinc_environment === "sandbox";
     const phrase = simulation ? "SIMULATE RECEIPT" : "ITEMS RECEIVED";
     const receipt = this._confirmReceipt === batch.id ? `<form class="notice confirm" data-form="receipt"><h3>${simulation ? "Complete selected test list items" : "Complete delivered list items"}</h3><p>${simulation ? "Simulate receipt by checking off selected linked Shopping List items. This does not claim carrier delivery or make a purchase." : "Only provider-confirmed delivered lines are eligible. Confirm you received these items."} Renamed, removed, failed, and skipped lines stay untouched.</p>${batch.orders.filter(order => eligible.includes(order.id)).map(order => `<label style="display:block;margin:10px 0"><input type="checkbox" name="receipt_line" value="${escapeHTML(order.id)}" ${this._receiptOrderIds.includes(order.id) ? "checked" : ""}> ${escapeHTML(order.name)} · quantity ${escapeHTML(order.quantity)}</label>`).join("")}${this._field(`Type ${phrase} to confirm`, "confirmation", this._receiptPhrase, { required: true })}<div class="actions" style="margin-top:12px"><button class="secondary" type="button" data-close-receipt>Keep list unchanged</button><button class="primary" type="submit" ${this._busy || this._receiptPhrase !== phrase || !this._receiptOrderIds.length ? "disabled" : ""}>Confirm list update</button></div></form>` : "";
-    return `<div class="actions">${this._data.mode === "Sandbox" && batch.can_submit_sandbox ? `<button class="primary" data-open-submit="${escapeHTML(batch.id)}" ${this._busy ? "disabled" : ""}>Submit sandbox batch</button>` : ""}${eligible.length ? `<button class="secondary" data-open-receipt="${escapeHTML(batch.id)}" ${this._busy ? "disabled" : ""}>${simulation ? "Complete test list items" : "Complete delivered list items"}</button>` : ""}</div>${submit}${receipt}`;
+    return `<div class="actions">${this._data.mode === "Sandbox" && batch.can_submit_sandbox ? `<button class="primary" data-open-submit="${escapeHTML(batch.id)}" ${this._busy ? "disabled" : ""}>Submit sandbox batch</button>` : ""}${this._data.mode === "Live enabled" && batch.can_submit_live && batch.review_token ? `<button class="primary" data-open-live="${escapeHTML(batch.id)}" ${this._busy ? "disabled" : ""}>Review live order</button>` : ""}${eligible.length ? `<button class="secondary" data-open-receipt="${escapeHTML(batch.id)}" ${this._busy ? "disabled" : ""}>${simulation ? "Complete test list items" : "Complete delivered list items"}</button>` : ""}</div>${submit}${live}${receipt}`;
   }
   _details() {
     const batch = this._data.batches.find(item => item.id === this._selectedId);
@@ -207,6 +222,12 @@ export class ReorderPanel extends HTMLElement {
     const form = field.closest("form");
     if (!form || !field.name) return;
     const value = field.type === "checkbox" ? field.checked : field.value;
+    if (form.dataset.form === "live_submit") {
+      if (field.name === "live_reviewed") this._liveReviewed = field.checked;
+      else this._livePhrase = String(value);
+      form.querySelector('[type="submit"]').disabled = this._busy || this._livePhrase !== "PLACE LIVE ORDER" || !this._liveReviewed;
+      return;
+    }
     if (form.dataset.form === "notifications") {
       this._notificationDraft ||= structuredClone(this._data.preferences?.notification_settings || {persistent: true, events: ["cart_added", "batch_ready", "delivery", "attention"], notify_services: [], notify_entities: [], kiosk_services: [], kiosk_duration: 30, kiosk_chime: false, kiosk_scale: 1});
       if (["persistent", "kiosk_chime"].includes(field.name)) this._notificationDraft[field.name] = field.checked;
@@ -237,6 +258,7 @@ export class ReorderPanel extends HTMLElement {
   _submit(event) {
     event.preventDefault();
     if (this._busy) return;
+    if (event.target.dataset.form === "live_submit") { this._submitLive(); return; }
     if (event.target.dataset.form === "notifications") {
       this._manage("reorder/notifications_save", {settings: this._notificationDraft || this._data.preferences.notification_settings}, "Notification settings saved.");
       return;
@@ -258,6 +280,27 @@ export class ReorderPanel extends HTMLElement {
         rolling_hours: Number(settings.rolling_hours), sync_shopping_list: settings.sync_shopping_list,
         auto_complete_delivered: settings.auto_complete_delivered ?? true,
       } }, "Preferences saved. No purchase was made.");
+    }
+  }
+  async _submitLive() {
+    const batch = this._data?.batches.find(item => item.id === this._confirmLive);
+    if (this._busy || this._data.mode !== "Live enabled" || !batch?.can_submit_live || !this._liveReviewed || this._livePhrase !== "PLACE LIVE ORDER" || !this._liveReviewToken || batch.review_token !== this._liveReviewToken) return;
+    this._busy = true;
+    this._error = "";
+    this._notice = "";
+    this._render();
+    try {
+      await this._hass.callWS({type: "reorder/live_submit", entry_id: this._entryId, batch_id: batch.id, confirmation: "PLACE LIVE ORDER", review_token: this._liveReviewToken});
+      this._notice = "Live submission accepted. This can incur real charges. Follow saved status and Zinc; placement is not delivery.";
+    } catch (error) { this._error = error.message || "Live submission may be uncertain. Check saved status and Zinc before any further purchase."; }
+    finally {
+      this._confirmLive = null;
+      this._livePhrase = "";
+      this._liveReviewed = false;
+      this._liveReviewToken = null;
+      await this._load();
+      this._busy = false;
+      this._render();
     }
   }
   async _submitSandbox() {
@@ -316,7 +359,7 @@ export class ReorderPanel extends HTMLElement {
   }
   _render() {
     const data = this._data;
-    this.shadowRoot.innerHTML = `<style>${css}</style><header><button class="menu" data-menu aria-label="Open Home Assistant menu">☰</button><h1>Reorder</h1><span class="grow"></span>${data ? this._mode(data.mode) : ""}<a class="settings" href="/config/integrations/integration/reorder">Connection</a></header><main><div class="top"><div><h2>Batches & orders</h2><p>Review your batches and track order progress.</p></div><button class="secondary" data-reload ${this._busy ? "disabled" : ""}>Reload</button></div>${this._error ? `<div class="notice error" role="alert">${escapeHTML(this._error)}</div>` : ""}${this._notice ? `<div class="notice" role="status">${escapeHTML(this._notice)}</div>` : ""}${data ? `${this._guidance()}<nav class="tabs" aria-label="Reorder sections"><button class="tab ${this._tab === "batches" ? "active" : ""}" data-tab="batches">Batches<span class="count">${data.batches.length}</span></button><button class="tab ${this._tab === "queue" ? "active" : ""}" data-tab="queue">Queue<span class="count">${data.queue.count}</span></button><button class="tab ${this._tab === "products" ? "active" : ""}" data-tab="products">Products</button><button class="tab ${this._tab === "settings" ? "active" : ""}" data-tab="settings">Settings</button></nav>${this._tab === "queue" ? this._queue() : this._tab === "products" ? this._productsPage() : this._tab === "settings" ? this._settingsPage() + this._notificationsPage() : `<div class="layout">${this._batchList()}${this._details()}</div>`}<p class="footer">${data.batches.filter(batch => batch.status === "ready").length} ready for review · ${data.product_count} enabled catalog product(s) · Sandbox ordering requires confirmation. Live purchasing stays outside this app.</p>` : '<div class="card loading" role="status">Loading Reorder…</div>'}</main>`;
+    this.shadowRoot.innerHTML = `<style>${css}</style><header><button class="menu" data-menu aria-label="Open Home Assistant menu">☰</button><h1>Reorder</h1><span class="grow"></span>${data ? this._mode(data.mode) : ""}<a class="settings" href="/config/integrations/integration/reorder">Connection</a></header><main><div class="top"><div><h2>Batches & orders</h2><p>Review your batches and track order progress.</p></div><button class="secondary" data-reload ${this._busy ? "disabled" : ""}>Reload</button></div>${this._error ? `<div class="notice error" role="alert">${escapeHTML(this._error)}</div>` : ""}${this._notice ? `<div class="notice" role="status">${escapeHTML(this._notice)}</div>` : ""}${data ? `${this._guidance()}<nav class="tabs" aria-label="Reorder sections"><button class="tab ${this._tab === "batches" ? "active" : ""}" data-tab="batches">Batches<span class="count">${data.batches.length}</span></button><button class="tab ${this._tab === "queue" ? "active" : ""}" data-tab="queue">Queue<span class="count">${data.queue.count}</span></button><button class="tab ${this._tab === "products" ? "active" : ""}" data-tab="products">Products</button><button class="tab ${this._tab === "settings" ? "active" : ""}" data-tab="settings">Settings</button></nav>${this._tab === "queue" ? this._queue() : this._tab === "products" ? this._productsPage() : this._tab === "settings" ? this._settingsPage() + this._notificationsPage() : `<div class="layout">${this._batchList()}${this._details()}</div>`}<p class="footer">${data.batches.filter(batch => batch.status === "ready").length} ready for review · ${data.product_count} enabled catalog product(s) · Sandbox ordering requires confirmation. Live purchasing requires opt-in, saved-content review and PLACE LIVE ORDER.</p>` : '<div class="card loading" role="status">Loading Reorder…</div>'}</main>`;
   }
   _click(event) {
     const button = event.target.closest("button");
@@ -329,7 +372,7 @@ export class ReorderPanel extends HTMLElement {
     }
     if ("reload" in data) { this._error = ""; this._load(); return; }
     if ("testNotification" in data) { this._testNotification(); return; }
-    if (data.tab) { this._tab = data.tab; this._confirmCancel = null; this._confirmSubmit = null; this._confirmReceipt = null; this._removeProductName = null; this._error = ""; this._notice = ""; }
+    if (data.tab) { this._tab = data.tab; this._confirmCancel = null; this._confirmSubmit = null; this._confirmLive = null; this._livePhrase = ""; this._liveReviewed = false; this._liveReviewToken = null; this._confirmReceipt = null; this._removeProductName = null; this._error = ""; this._notice = ""; }
     if ("newProduct" in data) {
       this._originalProduct = null;
       this._productDraft = { name: "", aliases: "", retailer: "zinc", product_id: "", quantity: 1, max_price: 50, cooldown_hours: 168, enabled: true, substitute_1: "", substitute_2: "", can_rename: true };
@@ -353,7 +396,16 @@ export class ReorderPanel extends HTMLElement {
       return;
     }
     if (data.filter) { this._filter = data.filter; }
-    if (data.batch) { this._selectedId = data.batch; this._confirmCancel = null; this._confirmSubmit = null; this._confirmReceipt = null; }
+    if (data.batch) { this._selectedId = data.batch; this._confirmCancel = null; this._confirmSubmit = null; this._confirmLive = null; this._livePhrase = ""; this._liveReviewed = false; this._liveReviewToken = null; this._confirmReceipt = null; }
+    if (data.openLive) {
+      const batch = this._data.batches.find(item => item.id === data.openLive);
+      if (this._data.mode !== "Live enabled" || !batch?.can_submit_live || !batch.review_token) return;
+      this._confirmLive = batch.id;
+      this._liveReviewToken = batch.review_token;
+      this._livePhrase = "";
+      this._liveReviewed = false;
+    }
+    if ("closeLive" in data) { this._confirmLive = null; this._livePhrase = ""; this._liveReviewed = false; this._liveReviewToken = null; }
     if (data.openSubmit) { this._confirmSubmit = data.openSubmit; this._sandboxPhrase = ""; }
     if ("closeSubmit" in data) this._confirmSubmit = null;
     if (data.openReceipt) { this._confirmReceipt = data.openReceipt; this._receiptPhrase = ""; this._receiptOrderIds = []; }

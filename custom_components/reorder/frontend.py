@@ -15,6 +15,7 @@ from .const import DOMAIN
 from .core import norm
 from .fulfillment import mapped_item, receipt_eligible, item_delivery_confirmed
 from .shopping import shopping_items
+from .review import review_token
 from .notifications import settings_for, destinations, async_deliver
 from .product_config import PRODUCT_SCHEMA, PREFERENCES_SCHEMA, NOTIFICATION_SCHEMA
 
@@ -60,6 +61,9 @@ def panel_data(engine, entry):
         item["can_refresh"] = bool(environment and batch.get("zinc_order_id")
                                     and batch.get("zinc_environment") == environment)
         item["can_submit_sandbox"] = bool(mode == "Sandbox" and item["can_cancel"])
+        item["can_submit_live"] = bool(mode == "Live enabled" and item["can_cancel"])
+        if item["can_submit_live"]:
+            item["review_token"] = review_token(engine, entry, batch["id"])
         item["receivable_order_ids"] = []
         raw_orders = [member for member in members if member is not None]
         for order in item["orders"]:
@@ -212,6 +216,30 @@ async def websocket_notification_test(hass, connection, msg):
 
 
 @websocket_api.websocket_command({
+    vol.Required("type"): "reorder/live_submit",
+    vol.Required("entry_id"): str,
+    vol.Required("batch_id"): str,
+    vol.Required("confirmation"): vol.In(["PLACE LIVE ORDER"]),
+    vol.Required("review_token"): str,
+})
+@websocket_api.async_response
+async def websocket_live_submit(hass, connection, msg):
+    engine = _manage_engine(hass, connection, msg)
+    if engine is None:
+        return
+    entry = hass.config_entries.async_get_entry(msg["entry_id"])
+    if (entry is None or not entry.options.get("zinc_api_key", "").startswith("zn_live_")
+            or not entry.options.get("zinc_live_enabled", False)):
+        connection.send_error(msg["id"], "live_disabled", "Enable live purchasing with a live key before reviewing this order")
+        return
+    # Native service revalidates the seal after dispatch, before capturing the client.
+    result = await hass.services.async_call(DOMAIN, "submit_batch_zinc",
+        {"batch_id": msg["batch_id"], "confirmation": msg["confirmation"], "review_token": msg["review_token"]},
+        blocking=True, return_response=True, context=Context(user_id=getattr(connection.user, "id", None)))
+    connection.send_result(msg["id"], result)
+
+
+@websocket_api.websocket_command({
     vol.Required("type"): "reorder/sandbox_submit",
     vol.Required("entry_id"): str,
     vol.Required("batch_id"): str,
@@ -270,7 +298,7 @@ async def async_setup_panel(hass, entry):
         ])
         hass.data[_STATIC_KEY] = True
     if not hass.data.get(_WS_KEY):
-        for handler in (websocket_panel, websocket_product_save, websocket_product_remove, websocket_preferences_save, websocket_sandbox_submit, websocket_receive_items, websocket_notification_test, websocket_notifications_save):
+        for handler in (websocket_panel, websocket_product_save, websocket_product_remove, websocket_preferences_save, websocket_sandbox_submit, websocket_receive_items, websocket_notification_test, websocket_notifications_save, websocket_live_submit):
             websocket_api.async_register_command(hass, handler)
         hass.data[_WS_KEY] = True
     if PANEL_PATH in hass.data.get(frontend.DATA_PANELS, {}):

@@ -733,7 +733,7 @@ class BatchActionsTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(panel.sidebar_title, "Reorder")
         self.assertTrue(panel.require_admin)
         self.assertEqual(panel.config["entry_id"], self.entry.entry_id)
-        self.assertEqual(panel.config["_panel_custom"]["module_url"], "/reorder-assets/reorder-panel.js?v=0.9.0")
+        self.assertEqual(panel.config["_panel_custom"]["module_url"], "/reorder-assets/reorder-panel.js?v=0.10.0")
         self.assertEqual(panel.config["_panel_custom"]["name"], "reorder-panel")
 
     async def test_sidebar_snapshot_excludes_credentials_and_preserves_data(self):
@@ -1208,9 +1208,9 @@ class BatchActionsTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_management_commands_reject_non_admin_users(self):
         from types import SimpleNamespace
-        from custom_components.reorder.frontend import websocket_product_save, websocket_product_remove, websocket_preferences_save, websocket_sandbox_submit, websocket_receive_items, websocket_notification_test, websocket_notifications_save
+        from custom_components.reorder.frontend import websocket_product_save, websocket_product_remove, websocket_preferences_save, websocket_sandbox_submit, websocket_receive_items, websocket_notification_test, websocket_notifications_save, websocket_live_submit
         before = deepcopy(self.engine.store.data)
-        for handler in (websocket_product_save, websocket_product_remove, websocket_preferences_save, websocket_sandbox_submit, websocket_receive_items, websocket_notification_test, websocket_notifications_save):
+        for handler in (websocket_product_save, websocket_product_remove, websocket_preferences_save, websocket_sandbox_submit, websocket_receive_items, websocket_notification_test, websocket_notifications_save, websocket_live_submit):
             connection = MagicMock(user=SimpleNamespace(is_admin=False))
             await handler.__wrapped__(self.hass, connection, {"id": 1, "entry_id": self.entry.entry_id})
             connection.send_error.assert_called_once_with(1, "unauthorized", "Administrator access is required")
@@ -1951,6 +1951,103 @@ class BatchActionsTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.notification_calls, [])
         self.assertEqual(self.coffee_orders(), [])
         self.transport.assert_not_awaited()
+
+    def enable_mock_live(self):
+        # Synthetic key only; ZincClient.request remains mocked for every request.
+        self.hass.config_entries.async_update_entry(self.entry, options=self.options | {
+            "zinc_api_key": "zn_live_not-a-real-key", "zinc_live_enabled": True})
+
+    async def test_live_app_gateway_reuses_native_confirmation_idempotency_and_price_cap(self):
+        from custom_components.reorder.frontend import panel_data, websocket_live_submit
+        self.enable_mock_live()
+        batch = await self.prepare()
+        snapshot = panel_data(self.engine, self.entry)["batches"][0]
+        self.assertTrue(snapshot["can_submit_live"])
+        self.assertFalse(snapshot["can_submit_sandbox"])
+        connection = await self.admin_command(websocket_live_submit, batch_id=batch["id"],
+            confirmation="PLACE LIVE ORDER", review_token=snapshot["review_token"])
+        connection.send_error.assert_not_called()
+        self.transport.assert_awaited_once()
+        method, path, payload = self.transport.await_args.args
+        self.assertEqual((method, path), ("POST", "/orders"))
+        self.assertEqual(payload["idempotency_key"], "reorder-batch-" + batch["id"])
+        self.assertEqual(payload["max_price"], 1250)
+        self.assertEqual(self.engine.store.data["batches"][batch["id"]]["zinc_environment"], "live")
+        with self.assertRaises(HomeAssistantError):
+            await self.admin_command(websocket_live_submit, batch_id=batch["id"],
+                confirmation="PLACE LIVE ORDER", review_token=snapshot["review_token"])
+        self.transport.assert_awaited_once()
+
+    async def test_live_app_requires_live_key_and_opt_in_independently_of_client(self):
+        from custom_components.reorder.frontend import panel_data, websocket_live_submit
+        batch = await self.prepare()
+        for options in (self.options, self.options | {"zinc_api_key": "zn_live_not-a-real-key", "zinc_live_enabled": False}):
+            self.hass.config_entries.async_update_entry(self.entry, options=options)
+            snapshot = panel_data(self.engine, self.entry)["batches"][0]
+            self.assertFalse(snapshot["can_submit_live"])
+            self.assertNotIn("review_token", snapshot)
+            result = await self.admin_command(websocket_live_submit, batch_id=batch["id"],
+                confirmation="PLACE LIVE ORDER", review_token="forged")
+            result.send_error.assert_called_once()
+        self.transport.assert_not_awaited()
+
+    async def test_live_review_seal_rejects_account_address_and_saved_content_changes(self):
+        from custom_components.reorder.frontend import panel_data, websocket_live_submit
+        self.enable_mock_live()
+        batch = await self.prepare()
+        options = dict(self.entry.options)
+        for change in ({"zinc_api_key": "zn_live_another-fake-key"}, {"ship_city": "Different test city"}):
+            self.hass.config_entries.async_update_entry(self.entry, options=options)
+            token = panel_data(self.engine, self.entry)["batches"][0]["review_token"]
+            self.hass.config_entries.async_update_entry(self.entry, options=options | change)
+            with self.assertRaisesRegex(HomeAssistantError, "Review changed"):
+                await self.admin_command(websocket_live_submit, batch_id=batch["id"], confirmation="PLACE LIVE ORDER", review_token=token)
+        self.hass.config_entries.async_update_entry(self.entry, options=options)
+        token = panel_data(self.engine, self.entry)["batches"][0]["review_token"]
+        self.engine.store.data["batches"][batch["id"]]["max_price"] = 99
+        with self.assertRaisesRegex(HomeAssistantError, "Review changed"):
+            await self.admin_command(websocket_live_submit, batch_id=batch["id"], confirmation="PLACE LIVE ORDER", review_token=token)
+        self.transport.assert_not_awaited()
+
+    async def test_live_review_is_bound_to_batch_and_resets_after_reload(self):
+        from custom_components.reorder.frontend import panel_data, websocket_live_submit
+        self.enable_mock_live()
+        self.engine.store.data["orders"]["2"] = order(2)
+        first = await self.call("prepare_batch", {"max_items": 1}, response=True)
+        second = await self.call("prepare_batch", {"max_items": 1}, response=True)
+        snapshot = next(batch for batch in panel_data(self.engine, self.entry)["batches"] if batch["id"] == first["id"])
+        token = snapshot["review_token"]
+        with self.assertRaisesRegex(HomeAssistantError, "Review changed"):
+            await self.admin_command(websocket_live_submit, batch_id=second["id"], confirmation="PLACE LIVE ORDER", review_token=token)
+        self.assertTrue(await self.hass.config_entries.async_unload(self.entry.entry_id))
+        self.assertTrue(await self.hass.config_entries.async_setup(self.entry.entry_id))
+        await self.hass.async_block_till_done()
+        self.engine = self.hass.data["reorder"][self.entry.entry_id]
+        with self.assertRaisesRegex(HomeAssistantError, "Review changed"):
+            await self.admin_command(websocket_live_submit, batch_id=first["id"], confirmation="PLACE LIVE ORDER", review_token=token)
+        self.transport.assert_not_awaited()
+
+    async def test_live_app_still_rechecks_source_state_before_purchase(self):
+        from custom_components.reorder.frontend import panel_data, websocket_live_submit
+        await self.configure_coffee()
+        await self.add_shopping_item("coffee")
+        self.enable_mock_live()
+        batch = await self.prepare()
+        token = panel_data(self.engine, self.entry)["batches"][0]["review_token"]
+        self.hass.data["shopping_list"].items[-1]["complete"] = True  # Pending source event.
+        with self.assertRaisesRegex(HomeAssistantError, "removed or completed"):
+            await self.admin_command(websocket_live_submit, batch_id=batch["id"], confirmation="PLACE LIVE ORDER", review_token=token)
+        self.transport.assert_not_awaited()
+
+    async def test_two_live_app_submissions_with_same_review_create_one_purchase(self):
+        from custom_components.reorder.frontend import panel_data, websocket_live_submit
+        self.enable_mock_live()
+        batch = await self.prepare()
+        token = panel_data(self.engine, self.entry)["batches"][0]["review_token"]
+        results = await asyncio.gather(*[self.admin_command(websocket_live_submit, batch_id=batch["id"],
+            confirmation="PLACE LIVE ORDER", review_token=token) for _ in range(2)], return_exceptions=True)
+        self.assertEqual(sum(isinstance(result, HomeAssistantError) for result in results), 1)
+        self.transport.assert_awaited_once()
 
     async def test_missing_shipping_address_blocks_submission(self):
         batch = await self.prepare()

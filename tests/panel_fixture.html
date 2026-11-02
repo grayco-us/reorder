@@ -40,6 +40,13 @@ panel.hass = {
       window.snapshot.product_count = window.snapshot.catalog.filter(product => product.enabled).length;
       return { removed: true };
     }
+    if (message.type === 'reorder/live_submit') {
+      const batch = window.snapshot.batches.find(item => item.id === message.batch_id);
+      if (window.snapshot.mode !== 'Live enabled' || !batch?.can_submit_live || message.confirmation !== 'PLACE LIVE ORDER' || message.review_token !== batch.review_token) throw {message: 'Live review rejected'};
+      Object.assign(batch, {status: 'pending', status_label: 'Pending', zinc_environment: 'live', zinc_order_id: 'mock-live-id', can_submit_live: false, can_cancel: false, can_refresh: true});
+      delete batch.review_token;
+      return structuredClone(batch);
+    }
     if (message.type === 'reorder/notifications_save') {
       window.snapshot.preferences.notification_settings = structuredClone(message.settings);
       return {saved: true};

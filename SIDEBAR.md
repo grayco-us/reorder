@@ -1,4 +1,4 @@
-# Reorder sidebar app (v0.9.0)
+# Reorder sidebar app (v0.10.0)
 
 Reorder now bundles its own responsive frontend and automatically adds **Reorder**
 to Home Assistant's sidebar. There is no dashboard YAML to paste, no resource URL
@@ -50,8 +50,9 @@ retained. No batch migration or API-key re-entry is required.
 - **Connection:** Opens the existing Reorder integration configuration.
 
 Ready sandbox batches now have a typed-confirmation submission control. The backend
-requires a test key independently of the browser. There is no live-purchase button;
-manual live actions retain their existing safeguards. See [the ordering guide](ORDERING.md)
+requires a test key independently of the browser. Live-enabled administrators also have **Review live order**, with a separate real-money
+warning, saved-content acknowledgement and **PLACE LIVE ORDER**. Native actions retain
+their existing safeguards. See [the ordering guide](ORDERING.md)
 for item outcomes, periodic Zinc status checks and delivery/list synchronization.
 Purchases are never retried or scheduled automatically. Reorder does not poll carriers
 directly or cancel retailer orders.
@@ -153,8 +154,9 @@ provides an independent switch to keep receipt manual. Missing/mismatched provid
 
 The mode notice explains Sandbox, Live disabled and Live enabled. Expand **What these
 terms mean** for queue/batch states, ceilings, delivery, list completion and recovery.
-See [LIVE_TESTING.md](LIVE_TESTING.md) for the native action used for a first real order.
-The app has no live submit button; purchasing controls and safeguards are unchanged.
+See [LIVE_TESTING.md](LIVE_TESTING.md) for in-app live review and the native alternative.
+Live review is bound to saved batch contents and connection options. A change or an
+integration reload invalidates the confirmation; administrators must review again.
 
 ## Notifications
 

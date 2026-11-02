@@ -2,6 +2,17 @@
 
 Home Assistant custom integration for routing exact, preapproved shopping-list items to a persistent order queue, with **Zinc API submission (sandbox first)**.
 
+## v0.10.0: Reviewed live submission in the app
+
+Administrators with a live key and live purchasing enabled can select a ready batch,
+choose **Review live order**, acknowledge its saved contents and combined ceiling,
+and type **PLACE LIVE ORDER** before submitting once. Confirmation is bound to that
+batch and connection options; edits, account/address changes and integration reloads
+require fresh review. Existing native actions, duplicate protection, uncertainty locks
+and Sandbox/live safeguards remain. No notification or kiosk tap approves a purchase.
+See [LIVE_TESTING.md](LIVE_TESTING.md) before a user-run real order. All development
+checks use mocked transport and synthetic credentials; no live order was placed.
+
 ## v0.9.0: Configurable cart and review notifications
 
 **Reorder → Settings → Notifications** controls cart additions, prepared-batch review

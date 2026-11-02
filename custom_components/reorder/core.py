@@ -2,6 +2,7 @@
 from copy import deepcopy
 import asyncio
 import logging
+import secrets
 from datetime import timedelta
 from uuid import uuid4
 from urllib.parse import urlparse
@@ -45,6 +46,7 @@ class ReorderEngine:
         self.selected_batch_id = None
         self.intake_events = []
         self.notification_delivery = None
+        self.review_secret = secrets.token_bytes(32)
 
     def publish(self):
         self.hass.bus.async_fire(EVENT_UPDATED)

@@ -1,9 +1,9 @@
-# First live trial (v0.8.1)
+# First live trial (v0.10.0)
 
 This guide is for a user-run real purchase, not another Sandbox simulation. No live
-order has been verified by the automated tests. The sidebar's submit control remains
-Sandbox only; live submission uses Home Assistant's native action and the exact
-`PLACE LIVE ORDER` phrase. Saving settings, adding list items, preparing a batch and
+order has been verified by the automated tests. Live submission is available in the sidebar for administrators, with live purchasing
+enabled, an explicit saved-content review and the exact `PLACE LIVE ORDER` phrase.
+The existing native action remains available. Saving settings, adding list items, preparing a batch and
 scheduled batch preparation never submit purchases.
 
 ## Prepare one small trial
@@ -42,7 +42,18 @@ submission selects the environment. Review saved contents again after switching 
 ## Submit once, then observe
 
 When you are ready to make the real purchase, enable **live purchasing** in Connection.
-The app should show **Live enabled**. In **Developer Tools → Actions**, select
+The app should show **Live enabled**. Select the intended ready batch and choose
+**Review live order**. Check its saved products, URLs/pack sizes, quantities and combined
+ceiling, and verify delivery details in Connection. Tick **I checked the saved products,
+quantities and combined spending limit**, type **PLACE LIVE ORDER**, then choose
+**Place live order** once. This can spend real money.
+
+The app confirmation is bound to the reviewed batch and connection options. Changing
+saved contents, credentials, delivery details or live opt-in, or reloading the integration,
+requires a fresh review. A stale confirmation fails before submission. Notifications
+and kiosk cards remain informational; they cannot authorize this step.
+
+Alternatively, in **Developer Tools → Actions**, select
 **Reorder: Submit Zinc batch** (`reorder.submit_batch_zinc`) and enter the local saved
 batch ID shown in the app. This is not the Zinc order ID or a product/order-line ID.
 

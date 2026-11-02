@@ -1,9 +1,10 @@
-# Sandbox ordering, tracking, and Shopping List receipt (v0.8.1)
+# Sandbox ordering, tracking, and Shopping List receipt (v0.10.0)
 
 The sidebar now supports the next stage of the workflow: explicitly submit a **sandbox**
 batch, retrieve item/fulfillment/tracking details, and automatically check off linked Shopping List items after confirmed per-item delivery.
-Explicit selected receipt remains available for testing or manual management. The app still has **no live-purchase control**. Existing
-manual live actions retain their original opt-in and confirmation safeguards.
+Explicit selected receipt remains available for testing or manual management. Live batches now have a separate **Review live order** flow requiring admin access,
+live opt-in, saved-content acknowledgement and **PLACE LIVE ORDER**. Existing native
+submission actions retain their original safeguards; see [LIVE_TESTING.md](LIVE_TESTING.md).
 
 For a user-run first real purchase, use [LIVE_TESTING.md](LIVE_TESTING.md).
 
