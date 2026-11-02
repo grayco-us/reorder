@@ -12,6 +12,24 @@ panel.hass = {
   async callWS(message) {
     window.reorderCalls.push(message);
     if (message.type === 'reorder/panel') return structuredClone(window.snapshot);
+    if (message.type === 'reorder/product_save') {
+      const index = window.snapshot.catalog.findIndex(product => product.name === message.original_name);
+      if (!message.product.product_id.startsWith('https://')) throw { message: 'Zinc requires HTTPS' };
+      if (index < 0 && window.snapshot.catalog.some(product => product.name === message.product.name)) throw { message: 'Product already exists' };
+      const product = { ...structuredClone(message.product), can_rename: index < 0 || window.snapshot.catalog[index].can_rename };
+      if (index < 0) window.snapshot.catalog.push(product); else window.snapshot.catalog[index] = product;
+      window.snapshot.product_count = window.snapshot.catalog.filter(product => product.enabled).length;
+      return { saved: true };
+    }
+    if (message.type === 'reorder/product_remove') {
+      window.snapshot.catalog = window.snapshot.catalog.filter(product => product.name !== message.name);
+      window.snapshot.product_count = window.snapshot.catalog.filter(product => product.enabled).length;
+      return { removed: true };
+    }
+    if (message.type === 'reorder/preferences_save') {
+      window.snapshot.preferences = structuredClone(message.preferences);
+      return structuredClone(message.preferences);
+    }
     if (window.failNextAction) { window.failNextAction = false; throw { message: 'Simulated network failure' }; }
     const batch = window.snapshot.batches.find(item => item.id === message.service_data.batch_id);
     if (message.service === 'cancel_batch') {

@@ -150,7 +150,8 @@
     "error": {
       "required_fields": "Enter a product name and product ID.",
       "already_exists": "A product with this name already exists.",
-      "live_key_required": "Live mode requires a zn_live_ API key."
+      "live_key_required": "Live mode requires a zn_live_ API key.",
+      "invalid_product": "Check the HTTPS URL, limits, and unique aliases. Products with order history cannot be renamed."
     },
     "abort": {
       "empty_catalog": "Add a product first.",

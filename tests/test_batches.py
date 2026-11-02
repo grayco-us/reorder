@@ -733,7 +733,7 @@ class BatchActionsTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(panel.sidebar_title, "Reorder")
         self.assertTrue(panel.require_admin)
         self.assertEqual(panel.config["entry_id"], self.entry.entry_id)
-        self.assertEqual(panel.config["_panel_custom"]["module_url"], "/reorder-assets/reorder-panel.js?v=0.5.1")
+        self.assertEqual(panel.config["_panel_custom"]["module_url"], "/reorder-assets/reorder-panel.js?v=0.6.0")
         self.assertEqual(panel.config["_panel_custom"]["name"], "reorder-panel")
 
     async def test_sidebar_snapshot_excludes_credentials_and_preserves_data(self):
@@ -881,7 +881,8 @@ class BatchActionsTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_ambiguous_catalog_alias_does_not_choose_a_product(self):
         await self.configure_coffee()
-        await self.configure_coffee(name="Other coffee", aliases=["coffee"])
+        # Legacy stored ambiguity remains diagnosable; new writes now reject it.
+        self.engine.store.data["products"]["other coffee"] = deepcopy(self.engine.store.data["products"]["coffee"]) | {"name": "Other coffee", "aliases": ["coffee"]}
         await self.add_shopping_item("coffee")
         self.assertEqual(self.engine.intake_events[0]["reason"], "ambiguous")
         self.assertEqual(self.coffee_orders(), [])
@@ -960,6 +961,339 @@ class BatchActionsTest(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(data["shopping_list_ready"])
         self.assertEqual(data["intake_events"], [])
         self.transport.assert_not_awaited()
+
+    async def source_change(self, **changes):
+        item = self.hass.data["shopping_list"].items[-1]
+        await self.hass.data["shopping_list"].async_update(item["id"], changes)
+        await self.hass.async_block_till_done()
+        return item
+
+    async def admin_command(self, handler, **values):
+        from types import SimpleNamespace
+        connection = MagicMock(user=SimpleNamespace(is_admin=True))
+        message = handler._ws_schema({"id": 100, "type": handler._ws_command, "entry_id": self.entry.entry_id, **values})
+        await handler.__wrapped__(self.hass, connection, message)
+        return connection
+
+    async def test_list_rename_replaces_unsubmitted_product_and_deduplicates(self):
+        await self.configure_coffee()
+        await self.configure_coffee(name="Tea", aliases=[])
+        await self.add_shopping_item("coffee")
+        first = self.coffee_orders()[0]
+        item = await self.source_change(name="Tea")
+        self.assertEqual(first["status"], "canceled")
+        tea = [order for order in self.engine.store.data["orders"].values() if order["product_key"] == "tea"]
+        self.assertEqual(len(tea), 1)
+        self.assertEqual(tea[0]["shopping_item_id"], item["id"])
+        await self.source_change(name="tea")
+        self.assertEqual(len([order for order in self.engine.store.data["orders"].values() if order["product_key"] == "tea"]), 1)
+        self.transport.assert_not_awaited()
+
+    async def test_alias_rename_keeps_ready_batch_and_frozen_product_values(self):
+        await self.configure_coffee()
+        await self.add_shopping_item("coffee")
+        batch = await self.prepare()
+        saved = self.coffee_orders()[0]
+        before = {key: saved[key] for key in ("product_id", "quantity", "max_price", "batch_id")}
+        await self.source_change(name="Morning brew")
+        self.assertEqual(self.engine.store.data["batches"][batch["id"]]["status"], "ready")
+        self.assertEqual({key: saved[key] for key in before}, before)
+        self.assertEqual(saved["shopping_item_name"], "Morning brew")
+        self.transport.assert_not_awaited()
+
+    async def test_unmatched_rename_invalidates_batch_and_preserves_history(self):
+        from custom_components.reorder.frontend import panel_data
+        await self.configure_coffee()
+        await self.add_shopping_item("coffee")
+        batch = await self.prepare()  # Includes the unrelated fixture product too.
+        await self.source_change(name="Unapproved snacks")
+        stored = self.engine.store.data["batches"][batch["id"]]
+        self.assertEqual(stored["status"], "invalidated")
+        self.assertEqual(self.coffee_orders()[0]["status"], "canceled")
+        self.assertEqual(self.engine.store.data["orders"]["1"]["status"], "queued")
+        self.assertNotIn("batch_id", self.engine.store.data["orders"]["1"])
+        report = await self.call("review_batch", {"batch_id": batch["id"]}, response=True)
+        self.assertEqual({line["status"] for line in report["orders"]}, {"canceled", "returned_to_queue"})
+        self.assertIsNone(panel_data(self.engine, self.entry)["batches"][0]["review_error"])
+        await self.prepare()  # Reassign the survivor; the old audit view must still work.
+        self.assertEqual((await self.call("review_batch", {"batch_id": batch["id"]}, response=True))["orders"], report["orders"])
+        with self.assertRaises(HomeAssistantError):
+            await self.submit(batch)
+        self.transport.assert_not_awaited()
+
+    async def test_completion_and_unchecking_queue_exactly_one_new_order(self):
+        await self.configure_coffee()
+        await self.add_shopping_item("coffee")
+        first = self.coffee_orders()[0]
+        await self.source_change(complete=True)
+        self.assertEqual(first["status"], "canceled")
+        await self.source_change(complete=False)
+        await self.source_change(complete=False)
+        self.assertEqual(len(self.coffee_orders()), 2)
+        self.assertEqual(sum(order["status"] == "queued" for order in self.coffee_orders()), 1)
+        self.transport.assert_not_awaited()
+
+    async def test_remove_invalidates_ready_batch_and_returns_other_lines(self):
+        await self.configure_coffee()
+        await self.add_shopping_item("coffee")
+        batch = await self.prepare()
+        item = self.hass.data["shopping_list"].items[-1]
+        await self.hass.data["shopping_list"].async_remove(item["id"])
+        await self.hass.async_block_till_done()
+        self.assertEqual(self.engine.store.data["batches"][batch["id"]]["status"], "invalidated")
+        self.assertEqual(self.coffee_orders()[0]["status"], "canceled")
+        self.assertEqual(self.engine.store.data["orders"]["1"]["status"], "queued")
+        self.assertNotIn("batch_id", self.engine.store.data["orders"]["1"])
+        self.transport.assert_not_awaited()
+
+    async def test_submitted_item_rename_completion_and_removal_never_cancel_purchase(self):
+        await self.configure_coffee()
+        await self.add_shopping_item("coffee")
+        saved = self.coffee_orders()[0]
+        await self.call("submit_zinc", {"order_id": saved["id"], "confirmation": "SANDBOX"})
+        before = deepcopy(saved)
+        await self.source_change(name="Tea")
+        await self.source_change(complete=True)
+        item = self.hass.data["shopping_list"].items[-1]
+        await self.hass.data["shopping_list"].async_remove(item["id"])
+        await self.hass.async_block_till_done()
+        self.assertEqual(saved, before)
+        self.assertEqual(self.engine.intake_events[0]["reason"], "submitted_unchanged")
+        self.transport.assert_awaited_once()
+
+    async def test_unknown_submission_is_untouched_by_list_removal(self):
+        await self.configure_coffee()
+        await self.add_shopping_item("coffee")
+        saved = self.coffee_orders()[0]
+        self.transport.side_effect = TimeoutError("simulated")
+        with self.assertRaises(TimeoutError):
+            await self.call("submit_zinc", {"order_id": saved["id"], "confirmation": "SANDBOX"})
+        item = self.hass.data["shopping_list"].items[-1]
+        await self.hass.data["shopping_list"].async_remove(item["id"])
+        await self.hass.async_block_till_done()
+        self.assertEqual(saved["status"], "submission_unknown")
+        self.assertEqual(self.engine.intake_events[0]["reason"], "submitted_unchanged")
+        self.transport.assert_awaited_once()
+
+    async def test_bulk_complete_clear_and_uncheck_do_not_duplicate_or_purchase(self):
+        await self.configure_coffee()
+        await self.add_shopping_item("coffee")
+        await self.hass.data["shopping_list"].async_update_list({"complete": True})
+        await self.hass.async_block_till_done()
+        self.assertEqual(self.coffee_orders()[0]["status"], "canceled")
+        await self.hass.data["shopping_list"].async_update_list({"complete": False})
+        await self.hass.async_block_till_done()
+        self.assertEqual(len(self.coffee_orders()), 2)
+        await self.hass.data["shopping_list"].async_update_list({"complete": True})
+        await self.hass.data["shopping_list"].async_clear_completed()
+        await self.hass.async_block_till_done()
+        self.assertTrue(all(order["status"] == "canceled" for order in self.coffee_orders()))
+        self.assertEqual(self.engine.store.data["orders"]["1"]["status"], "queued")
+        self.transport.assert_not_awaited()
+
+    async def test_list_sync_off_and_unavailable_source_never_guess_cancellation(self):
+        await self.configure_coffee()
+        await self.add_shopping_item("coffee")
+        before = deepcopy(self.engine.store.data)
+        await self.engine.handle_shopping_event("clear", items=None)
+        self.assertEqual(self.engine.store.data, before)
+        self.engine.store.data["preferences"]["sync_shopping_list"] = False
+        await self.source_change(complete=True)
+        self.assertEqual(self.coffee_orders()[0]["status"], "queued")
+        self.assertEqual(self.engine.intake_events[0]["reason"], "sync_disabled")
+        self.transport.assert_not_awaited()
+
+    async def test_manual_cancel_is_not_undone_by_unchecking_an_item(self):
+        await self.configure_coffee()
+        await self.add_shopping_item("coffee")
+        await self.source_change(complete=True)
+        await self.source_change(complete=False)
+        batch = await self.prepare()
+        await self.call("cancel_batch", {"batch_id": batch["id"]})
+        await self.source_change(complete=False)
+        self.assertEqual(len(self.coffee_orders()), 2)
+        self.assertTrue(all(order["status"] == "canceled" for order in self.coffee_orders()))
+        self.transport.assert_not_awaited()
+
+    async def test_sync_save_failure_restores_batch_orders_and_links(self):
+        await self.configure_coffee()
+        await self.add_shopping_item("coffee")
+        await self.prepare()
+        before = deepcopy(self.engine.store.data)
+        item = deepcopy(self.hass.data["shopping_list"].items[-1])
+        with patch.object(self.engine.store, "save", side_effect=OSError("disk full")):
+            with self.assertRaises(OSError):
+                await self.engine.handle_shopping_event("remove", item)
+        self.assertEqual(self.engine.store.data, before)
+        self.assertEqual(self.engine.intake_events[0]["reason"], "storage_error")
+        self.transport.assert_not_awaited()
+
+    async def test_submission_rechecks_list_before_a_remove_event_is_processed(self):
+        await self.configure_coffee()
+        await self.add_shopping_item("coffee")
+        batch = await self.prepare()
+        self.hass.data["shopping_list"].items.clear()  # Source state changed; event is pending.
+        before = deepcopy(self.engine.store.data)
+        with self.assertRaisesRegex(HomeAssistantError, "removed or completed"):
+            await self.submit(batch)
+        self.assertEqual(self.engine.store.data, before)
+        self.transport.assert_not_awaited()
+
+    async def test_rapid_rename_then_complete_cannot_resurrect_an_order(self):
+        await self.configure_coffee()
+        await self.configure_coffee(name="Tea", aliases=[])
+        await self.add_shopping_item("coffee")
+        item = self.hass.data["shopping_list"].items[-1]
+        await asyncio.gather(self.hass.data["shopping_list"].async_update(item["id"], {"name": "Tea"}),
+                             self.hass.data["shopping_list"].async_update(item["id"], {"complete": True}))
+        await self.hass.async_block_till_done()
+        self.assertTrue(all(order["status"] == "canceled" for order in self.engine.store.data["orders"].values()
+                            if order.get("shopping_item_id") == item["id"]))
+        self.transport.assert_not_awaited()
+
+    async def test_product_management_ws_validates_and_keeps_order_snapshots(self):
+        from custom_components.reorder.frontend import websocket_product_save, websocket_product_remove, panel_data
+        product = {"name": "Coffee", "retailer": "zinc", "product_id": "https://example.com/coffee", "aliases": ["brew"]}
+        result = await self.admin_command(websocket_product_save, product=product)
+        result.send_result.assert_called_once_with(100, {"saved": True})
+        await self.add_shopping_item("Coffee")
+        saved = deepcopy(self.coffee_orders()[0])
+        result = await self.admin_command(websocket_product_save, product=product | {"quantity": 3, "max_price": 30}, original_name="Coffee")
+        result.send_error.assert_not_called()
+        self.assertEqual(self.coffee_orders()[0], saved)
+        self.assertFalse(panel_data(self.engine, self.entry)["catalog"][0]["can_rename"])
+        result = await self.admin_command(websocket_product_save, product=product | {"name": "New name"}, original_name="Coffee")
+        result.send_error.assert_called_once()
+        await self.admin_command(websocket_product_remove, name="Coffee")
+        self.assertNotIn("coffee", self.engine.store.data["products"])
+        self.assertEqual(self.coffee_orders()[0], saved)
+        self.transport.assert_not_awaited()
+
+    async def test_product_creation_conflicts_and_invalid_url_do_not_overwrite(self):
+        from custom_components.reorder.frontend import websocket_product_save
+        await self.configure_coffee()
+        before = deepcopy(self.engine.store.data)
+        for product in (
+            {"name": "Coffee", "retailer": "zinc", "product_id": "https://example.com/new"},
+            {"name": "Tea", "aliases": ["coffee"], "retailer": "zinc", "product_id": "https://example.com/tea"},
+            {"name": "Tea", "retailer": "zinc", "product_id": "http://example.com/tea"},
+        ):
+            connection = await self.admin_command(websocket_product_save, product=product)
+            connection.send_error.assert_called_once()
+            self.assertEqual(self.engine.store.data, before)
+
+    async def test_product_and_preference_save_failures_restore_config(self):
+        await self.configure_coffee()
+        before = deepcopy(self.engine.store.data)
+        with patch.object(self.engine.store, "save", side_effect=OSError("disk full")):
+            with self.assertRaises(OSError):
+                await self.engine.remove_product("coffee")
+            self.assertEqual(self.engine.store.data, before)
+            with self.assertRaises(OSError):
+                await self.engine.upsert_product("Coffee", [], "zinc", "https://example.com/new", 3, 25, 24, True)
+            self.assertEqual(self.engine.store.data, before)
+            with self.assertRaises(OSError):
+                await self.engine.update_preferences(strategy="weekly", weekday=1, hour=12, rolling_hours=24)
+            self.assertEqual(self.engine.store.data, before)
+
+    async def test_preference_save_preserves_credentials_and_same_schedule_date(self):
+        from custom_components.reorder.frontend import websocket_preferences_save
+        self.engine.store.data["batch_settings"]["last_scheduled_date"] = "2026-11-02"
+        before_options = dict(self.entry.options)
+        connection = await self.admin_command(websocket_preferences_save, preferences={"strategy": "manual", "weekday": 6, "hour": 10, "rolling_hours": 48, "sync_shopping_list": False})
+        connection.send_error.assert_not_called()
+        self.assertEqual(self.engine.store.data["batch_settings"]["last_scheduled_date"], "2026-11-02")
+        self.assertFalse(self.engine.store.data["preferences"]["sync_shopping_list"])
+        self.assertEqual(dict(self.entry.options), before_options)
+
+    async def test_management_commands_reject_non_admin_users(self):
+        from types import SimpleNamespace
+        from custom_components.reorder.frontend import websocket_product_save, websocket_product_remove, websocket_preferences_save
+        before = deepcopy(self.engine.store.data)
+        for handler in (websocket_product_save, websocket_product_remove, websocket_preferences_save):
+            connection = MagicMock(user=SimpleNamespace(is_admin=False))
+            await handler.__wrapped__(self.hass, connection, {"id": 1, "entry_id": self.entry.entry_id})
+            connection.send_error.assert_called_once_with(1, "unauthorized", "Administrator access is required")
+        self.assertEqual(self.engine.store.data, before)
+
+    async def test_legacy_options_product_save_preserves_zinc_options(self):
+        before = dict(self.entry.options)
+        result = await self.hass.config_entries.options.async_init(self.entry.entry_id)
+        result = await self.hass.config_entries.options.async_configure(result["flow_id"], {"next_step_id": "add_product"})
+        self.assertEqual(result["step_id"], "add_product")
+        result = await self.hass.config_entries.options.async_configure(result["flow_id"], {
+            "name": "Tea", "aliases": "tea", "retailer": "zinc", "product_id": "https://example.com/tea",
+            "quantity": 1, "max_price": 25, "cooldown_hours": 168, "enabled": True,
+            "substitute_1": "", "substitute_2": "",
+        })
+        self.assertEqual(result["type"], "create_entry")
+        self.assertEqual(dict(self.entry.options), before)
+        self.assertIn("tea", self.engine.store.data["products"])
+
+    async def test_disabling_catalog_does_not_cancel_an_unchanged_queued_snapshot(self):
+        await self.configure_coffee()
+        await self.add_shopping_item("coffee")
+        saved = self.coffee_orders()[0]
+        await self.configure_coffee(enabled=False)
+        await self.source_change(complete=False)
+        self.assertEqual(saved["status"], "queued")
+        self.assertEqual(self.engine.intake_events[0]["reason"], "unchanged")
+        self.transport.assert_not_awaited()
+
+    async def test_reorder_list_event_does_not_change_orders(self):
+        await self.configure_coffee()
+        await self.add_shopping_item("coffee")
+        before = deepcopy(self.engine.store.data)
+        self.hass.data["shopping_list"].async_reorder([item["id"] for item in self.hass.data["shopping_list"].items])
+        await self.hass.async_block_till_done()
+        self.assertEqual(self.engine.store.data, before)
+        self.transport.assert_not_awaited()
+
+    async def test_legacy_schedule_options_save_preserves_zinc_credentials(self):
+        before = dict(self.entry.options)
+        result = await self.hass.config_entries.options.async_init(self.entry.entry_id)
+        result = await self.hass.config_entries.options.async_configure(result["flow_id"], {"next_step_id": "batch_settings"})
+        result = await self.hass.config_entries.options.async_configure(result["flow_id"], {
+            "strategy": "weekly", "weekday": 1, "hour": 12, "rolling_hours": 24,
+        })
+        self.assertEqual(result["type"], "create_entry")
+        self.assertEqual(dict(self.entry.options), before)
+        self.assertEqual(self.engine.store.data["batch_settings"]["strategy"], "weekly")
+
+    async def test_pending_ambiguous_alias_edit_blocks_stale_submission(self):
+        await self.configure_coffee()
+        await self.add_shopping_item("coffee")
+        batch = await self.prepare()
+        self.engine.store.data["products"]["legacy tea"] = deepcopy(self.engine.store.data["products"]["coffee"]) | {"name": "Legacy tea", "aliases": ["morning brew"]}
+        self.hass.data["shopping_list"].items[-1]["name"] = "Morning brew"
+        with self.assertRaisesRegex(HomeAssistantError, "renamed"):
+            await self.submit(batch)
+        self.transport.assert_not_awaited()
+
+    async def test_removal_during_submission_does_not_cancel_inflight_work(self):
+        await self.configure_coffee()
+        await self.add_shopping_item("coffee")
+        batch = await self.prepare()
+        entered, release = asyncio.Event(), asyncio.Event()
+        async def request(*args):
+            entered.set()
+            await release.wait()
+            return {"id": "mock-zinc-id", "status": "pending"}
+        self.transport.side_effect = request
+        submission = asyncio.create_task(self.submit(batch))
+        try:
+            await asyncio.wait_for(entered.wait(), 5)
+            item = self.hass.data["shopping_list"].items[-1]
+            await self.hass.data["shopping_list"].async_remove(item["id"])
+            await asyncio.sleep(0)
+        finally:
+            release.set()
+            await submission
+        await self.hass.async_block_till_done()
+        self.assertEqual(self.engine.store.data["batches"][batch["id"]]["status"], "pending")
+        self.assertEqual(self.coffee_orders()[0]["status"], "pending")
+        self.assertEqual(self.engine.intake_events[0]["reason"], "submitted_unchanged")
+        self.transport.assert_awaited_once()
 
     async def test_missing_shipping_address_blocks_submission(self):
         batch = await self.prepare()

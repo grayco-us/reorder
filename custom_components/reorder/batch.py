@@ -14,7 +14,7 @@ def batch_status_label(status):
         "submitted": "Submitted", "in_progress": "In progress", "order_placed": "Order placed",
         "failed": "Failed", "order_failed": "Failed", "canceled": "Canceled",
         "cancelled": "Canceled", "cancelled_by_retailer": "Canceled by retailer",
-        "submission_unknown": "Needs reconciliation",
+        "submission_unknown": "Needs reconciliation", "invalidated": "Needs fresh review",
     }.get(status, str(status).replace("_", " ").capitalize())
 
 def eligible_orders(data, retailer="zinc"):
@@ -68,6 +68,9 @@ def review_batch(data, batch_id):
     batch = data.get("batches", {}).get(batch_id)
     if batch is None:
         raise ValueError("Batch not found")
+    if batch["status"] == "invalidated" and "snapshot_orders" in batch:
+        orders = batch["snapshot_orders"]
+        return deepcopy({**batch, "orders": orders, "count": len(orders)})
     orders = []
     for order_id in batch["order_ids"]:
         order = data["orders"].get(order_id)

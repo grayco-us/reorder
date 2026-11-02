@@ -1,4 +1,4 @@
-# Reorder v0.5.1 — Batch testing
+# Reorder v0.6.0 — Batch testing
 
 **Development preview. No scheduled payments.** A weekly/rolling schedule only creates a persistent batch marked `ready`.
 
@@ -193,3 +193,12 @@ aliases. Check it when an added item is missing. Intake activity is transient (l
 20 additions since restart); stored orders and seen-item IDs remain persistent.
 Locally canceled, never-submitted work no longer causes cooldown for a fresh item.
 Canceled records are retained, while real-submission and duplicate protections remain.
+
+## Shopping List edits and setup (v0.6.0)
+
+[The flow guide](FLOWS.md) describes rename/complete/uncheck/remove and bulk behavior.
+Prepared batches affected by a product-changing list edit become `invalidated` and
+cannot be submitted; unaffected lines return to queue and the old review stays in
+history. Submission rechecks linked list state, while in-flight/submitted requests
+remain untouched. Product and batch/list preference forms now live in the sidebar;
+credentials and delivery configuration remain native and are preserved by legacy saves.

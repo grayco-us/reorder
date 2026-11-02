@@ -1,4 +1,5 @@
 """Catalog matching and safe, simulated order queue."""
+from copy import deepcopy
 import asyncio
 import logging
 from datetime import timedelta
@@ -6,7 +7,10 @@ from uuid import uuid4
 from urllib.parse import urlparse
 from homeassistant.core import callback
 from homeassistant.util import dt as dt_util
+from .batch import review_batch
+from .shopping import shopping_items
 from .notifications import async_notify
+from .product_config import PREFERENCES_SCHEMA, product_values
 from .const import ACTIVE_PURCHASE_STATUSES, EVENT_UPDATED
 
 _LOGGER = logging.getLogger(__name__)
@@ -34,32 +38,84 @@ class ReorderEngine:
     def __init__(self, hass, store):
         self.hass, self.store = hass, store
         self.lock = asyncio.Lock()
+        self.shopping_lock = asyncio.Lock()
         self.selected_batch_id = None
         self.intake_events = []
 
     def publish(self):
         self.hass.bus.async_fire(EVENT_UPDATED)
 
-    async def upsert_product(self, name, aliases, retailer, product_id, quantity, max_price, cooldown_hours, enabled, substitutes=None):
-        key = norm(name)
-        substitutes = validated_substitutes(product_id.strip(), substitutes)
-        if substitutes and retailer != "zinc":
+    async def upsert_product(self, name, aliases, retailer, product_id, quantity, max_price, cooldown_hours, enabled, substitutes=None, original_name=None, create_only=False):
+        values = product_values(dict(name=name, aliases=aliases, retailer=retailer,
+            product_id=product_id, quantity=quantity, max_price=max_price,
+            cooldown_hours=cooldown_hours, enabled=enabled, substitutes=substitutes or []))
+        key = norm(values["name"])
+        old_key = norm(original_name) if original_name is not None else key
+        replacements = validated_substitutes(values["product_id"], values["substitutes"])
+        if replacements and retailer != "zinc":
             raise ValueError("Substitutions currently require Zinc products")
         async with self.lock:
-            self.store.data["products"][key] = {
-                "name": name.strip(), "aliases": sorted(set(norm(s) for s in aliases if norm(s))),
-                "retailer": retailer, "product_id": product_id.strip(), "quantity": quantity,
-                "max_price": max_price, "cooldown_hours": cooldown_hours, "enabled": enabled,
-                "substitutes": substitutes,
-            }
-            await self.store.save()
+            products = self.store.data["products"]
+            if create_only and key in products:
+                raise ValueError("A product with this name already exists")
+            if original_name is not None and old_key not in products:
+                raise ValueError("The product no longer exists; reload before saving")
+            if old_key != key:
+                if key in products:
+                    raise ValueError("A product with this name already exists")
+                if any(order["product_key"] == old_key for order in self.store.data["orders"].values()):
+                    raise ValueError("A product with order history cannot be renamed; edit its aliases instead")
+            record = {"name": values["name"], "aliases": sorted(set(norm(alias) for alias in aliases if norm(alias))),
+                "retailer": retailer, "product_id": values["product_id"], "quantity": values["quantity"],
+                "max_price": values["max_price"], "cooldown_hours": values["cooldown_hours"],
+                "enabled": values["enabled"], "substitutes": replacements}
+            if record["enabled"]:
+                labels = {key, *record["aliases"]}
+                for other_key, other in products.items():
+                    if other_key != old_key and other["enabled"] and labels.intersection({other_key, *other["aliases"]}):
+                        raise ValueError(f"A name or alias already matches enabled product {other['name']}; make matches unique")
+            previous = deepcopy(products)
+            products.pop(old_key, None)
+            products[key] = record
+            try:
+                await self.store.save()
+            except Exception:
+                products.clear()
+                products.update(previous)
+                raise
         self.publish()
 
     async def remove_product(self, name):
         async with self.lock:
-            self.store.data["products"].pop(norm(name), None)
-            await self.store.save()
+            products = self.store.data["products"]
+            previous = deepcopy(products)
+            products.pop(norm(name), None)
+            try:
+                await self.store.save()
+            except Exception:
+                products.clear()
+                products.update(previous)
+                raise
         self.publish()
+
+    async def update_preferences(self, **values):
+        settings = PREFERENCES_SCHEMA(values)
+        sync = settings.pop("sync_shopping_list")
+        async with self.lock:
+            previous = deepcopy(self.store.data.get("batch_settings", {}))
+            previous_preferences = deepcopy(self.store.data.get("preferences", {}))
+            changed = any(previous.get(key) != value for key, value in settings.items())
+            self.store.data["batch_settings"] = {**previous, **settings,
+                "last_scheduled_date": None if changed else previous.get("last_scheduled_date")}
+            self.store.data["preferences"] = {**previous_preferences, "sync_shopping_list": sync}
+            try:
+                await self.store.save()
+            except Exception:
+                self.store.data["batch_settings"] = previous
+                self.store.data["preferences"] = previous_preferences
+                raise
+        self.publish()
+        return {**self.store.data["batch_settings"], "sync_shopping_list": sync}
 
     def _record_intake(self, item, reason, message, order_id=None):
         """Bounded, per-run diagnostics; never store entire Shopping List payloads."""
@@ -69,6 +125,179 @@ class ReorderEngine:
         del self.intake_events[20:]
         self.publish()
         return event
+
+    def _shopping_sync_enabled(self):
+        return self.store.data.get("preferences", {}).get("sync_shopping_list", True)
+
+    def _check_shopping_items_before_submission(self, orders):
+        """Also guard against a list edit whose event has not finished processing."""
+        linked = [order for order in orders if order.get("shopping_item_id")]
+        if not linked or not self._shopping_sync_enabled():
+            return
+        items = shopping_items(self.hass)
+        if items is None:
+            raise ValueError("Shopping List state is unavailable; review it before submitting")
+        indexed = {str(item["id"]): item for item in items}
+        for order in linked:
+            item = indexed.get(order["shopping_item_id"])
+            if item is None or item.get("complete"):
+                raise ValueError("A Shopping List item was removed or completed; review the queue before submitting")
+            label = norm(item.get("name") or "")
+            labels = {norm(order.get("shopping_item_name", order["name"])), norm(order["name"])}
+            matches = [key for key, product in self.store.data["products"].items()
+                       if product["enabled"] and label in {key, *product["aliases"]}]
+            if label not in labels and not (len(matches) == 1 and matches[0] == order["product_key"]):
+                raise ValueError("A Shopping List item was renamed; review the queue before submitting")
+
+    async def _cancel_list_item(self, item, change):
+        """Cancel local lines and invalidate ready batches atomically under one lock."""
+        item_id = str(item.get("id") or "")
+        async with self.lock:
+            linked = [order for order in self.store.data["orders"].values()
+                      if order.get("shopping_item_id") == item_id]
+            if any("zinc_environment" in order or order.get("zinc_order_id") for order in linked):
+                self._record_intake(item, "submitted_unchanged", "This item has submitted work. The Shopping List change did not cancel or alter a retailer order.")
+                return False
+            active = [order for order in linked if order["status"] in ("queued", "approved")]
+            if not active:
+                return True
+            batches = {}
+            touched = {order["id"]: order for order in active}
+            for order in active:
+                batch_id = order.get("batch_id")
+                if not batch_id:
+                    continue
+                batch = self.store.data.get("batches", {}).get(batch_id)
+                if (batch is None or batch["status"] != "ready" or "zinc_environment" in batch
+                        or batch.get("zinc_order_id")):
+                    self._record_intake(item, "sync_blocked", "The batch is not safely editable locally. Review its status before making changes.")
+                    return False
+                members = [self.store.data["orders"].get(key) for key in batch["order_ids"]]
+                if any(member is None or member.get("batch_id") != batch_id
+                       or member["status"] not in ("queued", "approved")
+                       or "zinc_environment" in member or member.get("zinc_order_id") for member in members):
+                    self._record_intake(item, "sync_blocked", "The batch contains changed or attempted work; it was left untouched.")
+                    return False
+                batches[batch_id] = batch
+                touched.update({member["id"]: member for member in members})
+            old_orders = {key: deepcopy(order) for key, order in touched.items()}
+            old_batches = {key: deepcopy(batch) for key, batch in batches.items()}
+            active_ids = {order["id"] for order in active}
+            now = dt_util.utcnow().isoformat()
+            snapshots_by_batch = {key: review_batch(self.store.data, key)["orders"] for key in batches}
+            for batch_id, batch in batches.items():
+                snapshots = snapshots_by_batch[batch_id]
+                for snapshot in snapshots:
+                    snapshot["status"] = "canceled" if snapshot["id"] in active_ids else "returned_to_queue"
+                batch.update(status="invalidated", invalidated_at=now, snapshot_orders=snapshots,
+                    note="Shopping List changed. Batch invalidated; unaffected lines returned to the queue for fresh review.")
+                for order_id in batch["order_ids"]:
+                    if order_id not in active_ids:
+                        survivor = touched[order_id]
+                        survivor.pop("batch_id", None)
+                        survivor["note"] = "Returned to queue after a Shopping List change; prepare a new batch for review."
+            for order in active:
+                order.update(status="canceled", canceled_at=now, shopping_list_change=change,
+                    note=f"Canceled locally after Shopping List {change}; no purchase was made.")
+            try:
+                await self.store.save()
+            except Exception:
+                for key, previous in old_orders.items():
+                    touched[key].clear()
+                    touched[key].update(previous)
+                for key, previous in old_batches.items():
+                    batches[key].clear()
+                    batches[key].update(previous)
+                self._record_intake(item, "storage_error", "Shopping List changes could not be saved. Review local work before submitting; no retailer request was made.")
+                raise
+            message = "Unsubmitted order canceled locally after the Shopping List change."
+            if batches:
+                message += " Its prepared batch was invalidated; other lines returned to the queue for fresh review."
+            self._record_intake(item, "list_change", message)
+            return True
+
+    async def _handle_item_change(self, action, item):
+        if not isinstance(item, dict) or not item.get("id"):
+            return
+        if action == "remove" or action == "complete" or item.get("complete"):
+            return await self._cancel_list_item(item, "remove" if action == "remove" else "complete")
+        item_id = str(item["id"])
+        async with self.lock:
+            linked = [order for order in self.store.data["orders"].values()
+                      if order.get("shopping_item_id") == item_id]
+            if any("zinc_environment" in order or order.get("zinc_order_id") for order in linked):
+                self._record_intake(item, "submitted_unchanged", "Submitted work is unchanged. Add a separate new item for a new request; list edits never cancel a purchase.")
+                return
+            active = [order for order in linked if order["status"] in ("queued", "approved")]
+            label = norm(item.get("name") or "")
+            matches = [key for key, product in self.store.data["products"].items()
+                       if product["enabled"] and label in {key, *product["aliases"]}]
+            same_label = active and all(norm(order.get("shopping_item_name", order["name"])) == label for order in active)
+            if active and (same_label or (len(matches) == 1 and all(order["product_key"] == matches[0] for order in active))):
+                previous_names = {order["id"]: order.get("shopping_item_name") for order in active}
+                changed = any(order.get("shopping_item_name") != item["name"] for order in active)
+                if changed:
+                    for order in active:
+                        order["shopping_item_name"] = item["name"]
+                    try:
+                        await self.store.save()
+                    except Exception:
+                        for order in active:
+                            old_name = previous_names[order["id"]]
+                            if old_name is None:
+                                order.pop("shopping_item_name", None)
+                            else:
+                                order["shopping_item_name"] = old_name
+                        raise
+                self._record_intake(item, "unchanged", "The edited name still matches the same product; saved quantities, prices, and batch were left unchanged.")
+                return
+        if active and not await self._cancel_list_item(item, "rename"):
+            return
+        async with self.lock:
+            history = [order for order in self.store.data["orders"].values() if order.get("shopping_item_id") == item_id]
+            latest = max(history, key=lambda order: order["created_at"], default=None)
+            resumable = (latest is not None and latest["status"] == "canceled"
+                         and latest.get("shopping_list_change") in ("rename", "complete")
+                         and "zinc_environment" not in latest and not latest.get("zinc_order_id"))
+            previous_seen = list(self.store.data["seen_items"])
+            if resumable:
+                self.store.data["seen_items"] = [key for key in previous_seen if key != item_id]
+                try:
+                    await self.store.save()
+                except Exception:
+                    self.store.data["seen_items"] = previous_seen
+                    self._record_intake(item, "storage_error", "The edited item could not be requeued. Existing canceled work was not revived; check logs and retry the list edit after storage is repaired.")
+                    raise
+        return await self.match_new_item(item)
+
+    async def handle_shopping_event(self, action, item=None, items=None):
+        """Serialize source events so rapid edits cannot reorder queue mutations."""
+        async with self.shopping_lock:
+            if action == "add":
+                return await self.match_new_item(item)
+            if not self._shopping_sync_enabled():
+                if isinstance(item, dict):
+                    self._record_intake(item, "sync_disabled", "Shopping List synchronization is off; existing orders were left unchanged.")
+                return
+            if action in ("update", "complete", "remove"):
+                return await self._handle_item_change(action, item)
+            if action not in ("clear", "update_list"):
+                return
+            if items is None:
+                self._record_intake({"name": "Shopping List"}, "sync_unavailable", "The current list could not be read. No orders were changed.")
+                return
+            if action == "update_list":
+                for current in items:
+                    await self._handle_item_change("update", current)
+            else:
+                ids = {str(current["id"]) for current in items}
+                async with self.lock:
+                    missing = {order["shopping_item_id"]: {"id": order["shopping_item_id"], "name": order["name"]}
+                               for order in self.store.data["orders"].values()
+                               if order.get("shopping_item_id") and order["shopping_item_id"] not in ids
+                               and order["status"] in ("queued", "approved")}
+                for current in missing.values():
+                    await self._handle_item_change("remove", current)
 
     async def match_new_item(self, item):
         if not isinstance(item, dict):
@@ -114,7 +343,7 @@ class ReorderEngine:
                 "product_id": product["product_id"], "quantity": product["quantity"],
                 "max_price": product["max_price"], "status": "queued",
                 "substitutes": list(product.get("substitutes", [])), "substitution_index": 0,
-                "shopping_item_id": item_id, "created_at": now.isoformat(),
+                "shopping_item_id": item_id, "shopping_item_name": item["name"], "created_at": now.isoformat(),
                 "note": "Queued locally; no retailer API was called.",
             }
             previous_seen = list(self.store.data["seen_items"])
@@ -197,6 +426,7 @@ class ReorderEngine:
                 raise ValueError("Zinc requires a full HTTPS product URL")
             if any(o["product_key"] == order["product_key"] and o["status"] in ACTIVE_PURCHASE_STATUSES for o in self.store.data["orders"].values() if o["id"] != order_id):
                 raise ValueError("Another order for this product is already active")
+            self._check_shopping_items_before_submission([order])
             order["status"] = "submitting"
             order["note"] = "Submission started; do not retry blindly if the connection fails."
             order["zinc_environment"] = "sandbox" if sandbox else "live"
@@ -259,6 +489,7 @@ class ReorderEngine:
                    and o["status"] in ACTIVE_PURCHASE_STATUSES
                    for o in self.store.data["orders"].values()):
                 raise ValueError("Another order for a batch product is active or uncertain")
+            self._check_shopping_items_before_submission(orders)
             batch["status"] = "submitting"
             batch["zinc_environment"] = "sandbox" if sandbox else "live"
             for order in orders:

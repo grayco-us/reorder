@@ -12,6 +12,7 @@ from homeassistant.loader import async_get_integration
 
 from .batch import batch_status_label, preview, review_batch
 from .const import DOMAIN
+from .product_config import PRODUCT_SCHEMA, PREFERENCES_SCHEMA
 
 PANEL_PATH = "reorder-app"
 ASSET_PATH = "/reorder-assets"
@@ -30,7 +31,7 @@ def panel_data(engine, entry):
     environment = "sandbox" if mode == "Sandbox" else "live" if mode == "Live enabled" else None
     batches = []
     fields = ("id", "status", "created_at", "max_price", "zinc_environment",
-              "zinc_order_id", "last_refreshed_at", "canceled_at")
+              "zinc_order_id", "last_refreshed_at", "canceled_at", "invalidated_at")
     for batch in sorted(engine.store.data.get("batches", {}).values(),
                         key=lambda item: item["created_at"], reverse=True):
         item = {field: batch[field] for field in fields if field in batch}
@@ -59,9 +60,12 @@ def panel_data(engine, entry):
         "shopping_list_ready": any(source.state is ConfigEntryState.LOADED for source in
                                    engine.hass.config_entries.async_entries("shopping_list")),
         "intake_events": deepcopy(engine.intake_events),
-        "catalog": [{"name": product["name"], "aliases": list(product["aliases"]),
-                     "retailer": product["retailer"], "enabled": product["enabled"]}
-                    for product in engine.store.data["products"].values()],
+        "preferences": {**engine.store.data.get("batch_settings", {}),
+                        "sync_shopping_list": engine.store.data.get("preferences", {}).get("sync_shopping_list", True)},
+        "catalog": [{**{field: product.get(field, [] if field in ("aliases", "substitutes") else None)
+                         for field in ("name", "aliases", "retailer", "product_id", "quantity", "max_price", "cooldown_hours", "enabled", "substitutes")},
+                     "can_rename": not any(order["product_key"] == key for order in engine.store.data["orders"].values())}
+                    for key, product in engine.store.data["products"].items()],
     }
 
 
@@ -85,6 +89,70 @@ async def websocket_panel(hass, connection, msg):
     connection.send_result(msg["id"], data)
 
 
+@websocket_api.websocket_command({
+    vol.Required("type"): "reorder/product_save",
+    vol.Required("entry_id"): str,
+    vol.Required("product"): PRODUCT_SCHEMA,
+    vol.Optional("original_name"): str,
+})
+@websocket_api.async_response
+async def websocket_product_save(hass, connection, msg):
+    engine = _manage_engine(hass, connection, msg)
+    if engine is None:
+        return
+    data = dict(msg["product"])
+    data.pop("create_only", None)
+    data.pop("original_name", None)
+    try:
+        await engine.upsert_product(**data, original_name=msg.get("original_name"), create_only="original_name" not in msg)
+    except (ValueError, vol.Invalid) as err:
+        connection.send_error(msg["id"], "invalid_product", str(err))
+        return
+    connection.send_result(msg["id"], {"saved": True})
+
+
+@websocket_api.websocket_command({
+    vol.Required("type"): "reorder/product_remove",
+    vol.Required("entry_id"): str,
+    vol.Required("name"): str,
+})
+@websocket_api.async_response
+async def websocket_product_remove(hass, connection, msg):
+    engine = _manage_engine(hass, connection, msg)
+    if engine is None:
+        return
+    await engine.remove_product(msg["name"])
+    connection.send_result(msg["id"], {"removed": True})
+
+
+@websocket_api.websocket_command({
+    vol.Required("type"): "reorder/preferences_save",
+    vol.Required("entry_id"): str,
+    vol.Required("preferences"): PREFERENCES_SCHEMA,
+})
+@websocket_api.async_response
+async def websocket_preferences_save(hass, connection, msg):
+    engine = _manage_engine(hass, connection, msg)
+    if engine is None:
+        return
+    try:
+        result = await engine.update_preferences(**msg["preferences"])
+    except (ValueError, vol.Invalid) as err:
+        connection.send_error(msg["id"], "invalid_preferences", str(err))
+        return
+    connection.send_result(msg["id"], result)
+
+
+def _manage_engine(hass, connection, msg):
+    if connection.user is None or not connection.user.is_admin:
+        connection.send_error(msg["id"], "unauthorized", "Administrator access is required")
+        return None
+    engine = hass.data.get(DOMAIN, {}).get(msg["entry_id"])
+    if engine is None:
+        connection.send_error(msg["id"], "not_found", "Reorder is not loaded")
+    return engine
+
+
 async def async_setup_panel(hass, entry):
     """Register assets once, with a cache-busted, integration-owned sidebar panel."""
     if not hass.data.get(_STATIC_KEY):
@@ -93,7 +161,8 @@ async def async_setup_panel(hass, entry):
         ])
         hass.data[_STATIC_KEY] = True
     if not hass.data.get(_WS_KEY):
-        websocket_api.async_register_command(hass, websocket_panel)
+        for handler in (websocket_panel, websocket_product_save, websocket_product_remove, websocket_preferences_save):
+            websocket_api.async_register_command(hass, handler)
         hass.data[_WS_KEY] = True
     if PANEL_PATH in hass.data.get(frontend.DATA_PANELS, {}):
         raise ValueError("A panel already uses /reorder-app; Reorder will not replace it")

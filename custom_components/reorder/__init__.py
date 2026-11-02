@@ -1,4 +1,5 @@
 """Reorder: shopping list order queue with optional Zinc integration."""
+from copy import deepcopy
 import logging
 
 from homeassistant.core import HomeAssistant, ServiceCall, ServiceResponse, SupportsResponse, callback
@@ -8,6 +9,8 @@ from homeassistant.helpers import config_validation as cv
 import voluptuous as vol
 from .frontend import async_remove_panel, async_setup_panel
 from .notifications import async_notify
+from .product_config import PRODUCT_SCHEMA
+from .shopping import shopping_items
 from .const import DOMAIN
 from .store import ReorderStore
 from .core import ReorderEngine
@@ -19,18 +22,6 @@ from homeassistant.util import dt as dt_util
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 _LOGGER = logging.getLogger(__name__)
-
-PRODUCT_SCHEMA = vol.Schema({
-    vol.Required("name"): cv.string,
-    vol.Optional("aliases", default=[]): [cv.string],
-    vol.Required("retailer"): vol.In(["zinc", "kroger", "other"]),
-    vol.Required("product_id"): cv.string,
-    vol.Optional("substitutes", default=[]): vol.All([cv.url], vol.Length(max=2)),
-    vol.Optional("quantity", default=1): vol.All(vol.Coerce(int), vol.Range(min=1, max=20)),
-    vol.Optional("max_price", default=50): vol.All(vol.Coerce(float), vol.Range(min=0.01)),
-    vol.Optional("cooldown_hours", default=168): vol.All(vol.Coerce(int), vol.Range(min=1)),
-    vol.Optional("enabled", default=True): cv.boolean,
-})
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     store = ReorderStore(hass)
@@ -46,14 +37,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     @callback
     def handle_shopping_event(event):
         data = event.data
-        if data.get("action") == "add":
-            hass.async_create_task(engine.match_new_item(data.get("item")))
+        action = data.get("action")
+        if action in ("add", "update", "complete", "remove", "clear", "update_list"):
+            # Source item dictionaries are mutable; capture the event at receipt time.
+            hass.async_create_task(engine.handle_shopping_event(action,
+                deepcopy(data.get("item")), shopping_items(hass) if action in ("clear", "update_list") else None))
 
     unsub = hass.bus.async_listen("shopping_list_updated", handle_shopping_event)
     entry.async_on_unload(unsub)
 
     async def add_product(call: ServiceCall):
-        await engine.upsert_product(**call.data)
+        try:
+            await engine.upsert_product(**call.data)
+        except ValueError as err:
+            raise HomeAssistantError(str(err)) from err
 
     async def remove_product(call: ServiceCall):
         await engine.remove_product(call.data["name"])

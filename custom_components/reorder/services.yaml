@@ -1,6 +1,6 @@
 set_product:
   name: Add or update approved product
-  description: Register an approved product. Shopping-list adds only queue orders.
+  description: Register an approved product with validated unique matching names/aliases. Changes apply to future matches; saved order snapshots remain unchanged. Shopping-list adds only queue orders.
   fields:
     name:
       required: true

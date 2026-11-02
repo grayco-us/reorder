@@ -123,3 +123,65 @@ test("queue shows matching explanations and configured aliases without performin
   view._render();
   assert.match(view.shadowRoot.innerHTML, /built-in Shopping List is not loaded/);
 });
+
+
+test("product forms send validated-shape values without credentials or order mutations", () => {
+  const view = panel(), calls = [];
+  view._originalProduct = "Morning coffee";
+  view._productDraft = { name: "Morning coffee", aliases: "coffee, morning brew", retailer: "zinc", product_id: "https://example.com/coffee", quantity: "2", max_price: "25", cooldown_hours: "24", enabled: true, substitute_1: "", substitute_2: "" };
+  view._manage = (...args) => calls.push(args);
+  view._submit({ preventDefault() {}, target: { dataset: { form: "product" } } });
+  assert.equal(calls[0][0], "reorder/product_save");
+  assert.equal(calls[0][1].original_name, "Morning coffee");
+  assert.deepEqual(calls[0][1].product.aliases, ["coffee", "morning brew"]);
+  assert.equal(calls[0][1].product.quantity, 2);
+  assert.equal(calls[0][1].product.max_price, 25);
+  assert.doesNotMatch(JSON.stringify(calls), /zinc_api_key|shipping_address|submit_batch/);
+});
+
+test("settings form sends schedule and synchronization preferences only", () => {
+  const view = panel(), calls = [];
+  view._preferencesDraft = { strategy: "weekly", weekday: "1", hour: "12", rolling_hours: "24", sync_shopping_list: false };
+  view._manage = (...args) => calls.push(args);
+  view._submit({ preventDefault() {}, target: { dataset: { form: "preferences" } } });
+  assert.equal(calls[0][0], "reorder/preferences_save");
+  assert.deepEqual(calls[0][1].preferences, { strategy: "weekly", weekday: 1, hour: 12, rolling_hours: 24, sync_shopping_list: false });
+});
+
+test("failed product saves preserve the draft and surface the validation message", async () => {
+  const view = panel();
+  view._tab = "products";
+  view._productDraft = { name: "Tea", aliases: "coffee", retailer: "zinc", product_id: "https://example.com/tea", quantity: 1, max_price: 25, cooldown_hours: 24, enabled: true, substitute_1: "", substitute_2: "" };
+  view._hass.callWS = async () => { throw { message: "Alias already belongs to Coffee" }; };
+  await view._manage("reorder/product_save", { product: {} }, "Saved");
+  assert.equal(view._productDraft.name, "Tea");
+  assert.match(view.shadowRoot.innerHTML, /Alias already belongs to Coffee/);
+  assert.equal(view._busy, false);
+});
+
+test("invalidated batches explain canceled and returned lines inline", () => {
+  const view = panel();
+  const batch = view._data.batches[0];
+  batch.status = "invalidated";
+  batch.status_label = "Needs fresh review";
+  batch.can_cancel = false;
+  batch.orders[0].status = "canceled";
+  batch.orders[1].status = "returned_to_queue";
+  view._selectedId = batch.id;
+  const html = view._details();
+  assert.match(html, /Needs fresh review/);
+  assert.match(html, /Returned to queue for fresh review/);
+  assert.match(html, /Canceled locally/);
+  assert.match(html, /This batch cannot be submitted/);
+});
+
+
+test("saving one settings page preserves an unrelated unsaved form draft", async () => {
+  const view = panel();
+  view._productDraft = { name: "Unsaved product" };
+  view._preferencesDraft = { strategy: "weekly" };
+  view._hass.callWS = async message => message.type === "reorder/panel" ? makePanelData() : {};
+  await view._manage("reorder/preferences_save", { preferences: {} }, "Saved");
+  assert.equal(view._productDraft.name, "Unsaved product");
+  assert.equal(view._preferencesDraft, null);
+});

@@ -25,9 +25,11 @@ RETAILERS = SelectSelector(
 def product_schema(product: dict | None = None) -> vol.Schema:
     """Form for an approved product. Aliases are entered comma-separated."""
     p = product or {}
+    aliases = p.get("aliases", [])
+    alias_text = aliases if isinstance(aliases, str) else ", ".join(aliases)
     return vol.Schema({
         vol.Required("name", default=p.get("name", "")): cv.string,
-        vol.Optional("aliases", default=", ".join(p.get("aliases", []))): cv.string,
+        vol.Optional("aliases", default=alias_text): cv.string,
         vol.Required("retailer", default=p.get("retailer", "zinc")): RETAILERS,
         vol.Required("product_id", default=p.get("product_id", "")): cv.string,
         vol.Optional("substitute_1", default=p.get("substitutes", [""])[0] if p.get("substitutes") else ""): cv.string,
@@ -74,8 +76,11 @@ class ReorderOptionsFlow(config_entries.OptionsFlow):
                 return self.async_show_form(step_id="add_product", data_schema=product_schema(), errors={"base": "required_fields"})
             if norm(name) in self._products():
                 return self.async_show_form(step_id="add_product", data_schema=product_schema(), errors={"base": "already_exists"})
-            await self._save_product(user_input)
-            return self.async_create_entry(title="Product added", data={})
+            try:
+                await self._save_product(user_input, create_only=True)
+            except (ValueError, vol.Invalid):
+                return self.async_show_form(step_id="add_product", data_schema=product_schema(user_input), errors={"base": "invalid_product"})
+            return self.async_create_entry(title="Product added", data=dict(self.config_entry.options))
         return self.async_show_form(step_id="add_product", data_schema=product_schema())
 
     async def async_step_edit_product(self, user_input=None) -> FlowResult:
@@ -99,11 +104,11 @@ class ReorderOptionsFlow(config_entries.OptionsFlow):
                 return self.async_show_form(step_id="update_product", data_schema=product_schema(current), errors={"base": "required_fields"})
             if new_key != self._selected_key and new_key in self._products():
                 return self.async_show_form(step_id="update_product", data_schema=product_schema(current), errors={"base": "already_exists"})
-            # Remove former key only after validating the new name.
-            if new_key != self._selected_key:
-                await self._engine().remove_product(current["name"])
-            await self._save_product(user_input)
-            return self.async_create_entry(title="Product updated", data={})
+            try:
+                await self._save_product(user_input, original_name=current["name"])
+            except (ValueError, vol.Invalid):
+                return self.async_show_form(step_id="update_product", data_schema=product_schema(user_input), errors={"base": "invalid_product"})
+            return self.async_create_entry(title="Product updated", data=dict(self.config_entry.options))
         return self.async_show_form(step_id="update_product", data_schema=product_schema(current))
 
     async def async_step_remove_product(self, user_input=None) -> FlowResult:
@@ -112,12 +117,12 @@ class ReorderOptionsFlow(config_entries.OptionsFlow):
             return self.async_abort(reason="empty_catalog")
         if user_input is not None:
             await self._engine().remove_product(user_input["product"])
-            return self.async_create_entry(title="Product removed", data={})
+            return self.async_create_entry(title="Product removed", data=dict(self.config_entry.options))
         return self.async_show_form(step_id="remove_product", data_schema=vol.Schema({
             vol.Required("product"): vol.In({k: p["name"] for k, p in products.items()})
         }))
 
-    async def _save_product(self, data):
+    async def _save_product(self, data, **extra):
         await self._engine().upsert_product(
             name=data["name"],
             aliases=[s.strip() for s in data["aliases"].split(",") if s.strip()],
@@ -127,7 +132,7 @@ class ReorderOptionsFlow(config_entries.OptionsFlow):
             substitutes=[data.get("substitute_1", ""), data.get("substitute_2", "")],
             max_price=data["max_price"],
             cooldown_hours=data["cooldown_hours"],
-            enabled=data["enabled"],
+            enabled=data["enabled"], **extra,
         )
 
     async def async_step_zinc_settings(self, user_input=None) -> FlowResult:
@@ -158,9 +163,7 @@ class ReorderOptionsFlow(config_entries.OptionsFlow):
             vol.Required("rolling_hours", default=settings.get("rolling_hours", 48)): vol.All(vol.Coerce(int), vol.Range(min=1, max=336)),
         })
         if user_input is not None:
-            self._engine().store.data["batch_settings"] = {
-                **settings, **user_input, "last_scheduled_date": None}
-            await self._engine().store.save()
-            self._engine().publish()
-            return self.async_create_entry(title="Batch schedule saved", data={})
+            await self._engine().update_preferences(**user_input,
+                sync_shopping_list=self._engine().store.data.get("preferences", {}).get("sync_shopping_list", True))
+            return self.async_create_entry(title="Batch schedule saved", data=dict(self.config_entry.options))
         return self.async_show_form(step_id="batch_settings", data_schema=schema)

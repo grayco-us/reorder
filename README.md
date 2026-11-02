@@ -2,6 +2,21 @@
 
 Home Assistant custom integration for routing exact, preapproved shopping-list items to a persistent order queue, with **Zinc API submission (sandbox first)**.
 
+## v0.6.0: Shopping List synchronization and in-app setup
+
+Reorder now handles renames, completion/unchecking, removal, and bulk list changes.
+Unsubmitted affected lines are canceled; prepared batches become **Needs fresh review**
+and return their other lines to the queue. Submitted/uncertain work is never altered
+by a list edit. Source state is rechecked before submission to close edit/submit races.
+See the [flow table and compatibility notes](FLOWS.md).
+
+The sidebar **Products** page adds product setup, editing, enable/disable and confirmed
+removal. **Settings** manages batching schedules and list synchronization. Validation
+and rollback are shared with the legacy interfaces, and native product/schedule forms
+now preserve saved Zinc connection options. Keys, delivery and live setup remain in
+Home Assistant's native configuration, linked from the app. Existing storage and
+purchasing safeguards remain compatible; no purchases are submitted by the app.
+
 ## v0.5.1: Explain Shopping List intake
 
 The sidebar Queue tab now shows the most recent Shopping List matching outcomes:

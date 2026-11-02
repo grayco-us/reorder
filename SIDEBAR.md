@@ -1,4 +1,4 @@
-# Reorder sidebar app (v0.5.1)
+# Reorder sidebar app (v0.6.0)
 
 Reorder now bundles its own responsive frontend and automatically adds **Reorder**
 to Home Assistant's sidebar. There is no dashboard YAML to paste, no resource URL
@@ -41,8 +41,13 @@ retained. No batch migration or API-key re-entry is required.
   or skipped. It shows the latest 20 received additions since restart, without saving
   a permanent activity history. Expand the catalog summary to check names, aliases,
   retailer and enabled state. A missing built-in Shopping List source is shown explicitly.
+- **Products:** Create/edit approved products, manage aliases, quantity, ceilings,
+  cooldown and substitutions, enable/disable matching, or confirm removal. Existing
+  order snapshots are not rewritten. Names with order history are locked; use aliases.
+- **Settings:** Save batch schedules and Shopping List synchronization preferences.
+  The linked native configuration continues to handle keys, delivery and live setup.
 - **Reload:** Reads the currently saved Reorder state; it does not refresh Zinc orders.
-- **Settings:** Opens the existing Reorder integration configuration.
+- **Connection:** Opens the existing Reorder integration configuration.
 
 There is no submit/purchase control in this release. Explicit sandbox/live submission
 still uses the existing actions and their confirmation requirements. The app adds no
@@ -122,3 +127,12 @@ catalog-only: activity explains why it does not appear in the next Zinc batch.
 
 End-to-end tests exercise both `shopping_list.add_item` and the built-in
 `todo.add_item` UI path with exact names/aliases, rather than only calling the matcher.
+
+## Shopping List synchronization and in-app setup
+
+See [Shopping List and configuration flows](FLOWS.md) for the complete behavior table.
+Completion/removal cancels unsubmitted work; edits that change the approved product
+invalidate a prepared batch and return unaffected lines for fresh review. Submitted
+purchases are never canceled by a list edit. The app shows **Needs fresh review** and
+the historical canceled/returned lines. Products and Settings are available as new
+app pages after deployment/restart and a browser refresh; no dashboard import is needed.
