@@ -107,3 +107,19 @@ test("prepare selects its returned batch without submitting a purchase", async (
   assert.equal(calls[0].service, "prepare_batch");
   assert.deepEqual(calls[0].service_data, { max_items: 10 });
 });
+
+
+test("queue shows matching explanations and configured aliases without performing actions", () => {
+  const view = panel();
+  view._tab = "queue";
+  view._data.intake_events = [{ name: "coffee", reason: "no_match", message: "No enabled catalog name or alias matches this item.", created_at: "2026-11-02T14:00:00Z" }];
+  view._data.catalog = [{ name: "Morning coffee", aliases: ["coffee"], enabled: true, retailer: "zinc" }];
+  view._render();
+  assert.match(view.shadowRoot.innerHTML, /Shopping List activity/);
+  assert.match(view.shadowRoot.innerHTML, /No catalog match/);
+  assert.match(view.shadowRoot.innerHTML, /Aliases: coffee/);
+  assert.match(view.shadowRoot.innerHTML, /built-in Shopping List/);
+  view._data.shopping_list_ready = false;
+  view._render();
+  assert.match(view.shadowRoot.innerHTML, /built-in Shopping List is not loaded/);
+});

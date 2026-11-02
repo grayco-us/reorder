@@ -1,4 +1,4 @@
-# Reorder v0.5.0 — Batch testing
+# Reorder v0.5.1 — Batch testing
 
 **Development preview. No scheduled payments.** A weekly/rolling schedule only creates a persistent batch marked `ready`.
 
@@ -185,3 +185,11 @@ with the integration and registered on startup, with no dashboard to create. Rev
 saved batches inline, prepare queued products locally, refresh status, or confirm a
 local cancellation. The existing submission actions retain their safeguards; no
 purchase control is included in the app. Old dashboards and entities remain usable.
+
+## Shopping List intake (v0.5.1)
+
+The Queue tab explains recent matching outcomes and shows the configured names and
+aliases. Check it when an added item is missing. Intake activity is transient (latest
+20 additions since restart); stored orders and seen-item IDs remain persistent.
+Locally canceled, never-submitted work no longer causes cooldown for a fresh item.
+Canceled records are retained, while real-submission and duplicate protections remain.

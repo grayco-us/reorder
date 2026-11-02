@@ -1,10 +1,12 @@
 """Bundled sidebar interface and a deliberately credential-free local data API."""
+from copy import deepcopy
 from pathlib import Path
 
 import voluptuous as vol
 
 from homeassistant.components import frontend, panel_custom, websocket_api
 from homeassistant.components.http import StaticPathConfig
+from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import callback
 from homeassistant.loader import async_get_integration
 
@@ -54,6 +56,12 @@ def panel_data(engine, entry):
     return {
         "mode": mode, "batches": batches, "queue": preview(engine.store.data),
         "product_count": sum(bool(product["enabled"]) for product in engine.store.data["products"].values()),
+        "shopping_list_ready": any(source.state is ConfigEntryState.LOADED for source in
+                                   engine.hass.config_entries.async_entries("shopping_list")),
+        "intake_events": deepcopy(engine.intake_events),
+        "catalog": [{"name": product["name"], "aliases": list(product["aliases"]),
+                     "retailer": product["retailer"], "enabled": product["enabled"]}
+                    for product in engine.store.data["products"].values()],
     }
 
 

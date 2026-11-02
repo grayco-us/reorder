@@ -1,4 +1,4 @@
-# Reorder sidebar app (v0.5.0)
+# Reorder sidebar app (v0.5.1)
 
 Reorder now bundles its own responsive frontend and automatically adds **Reorder**
 to Home Assistant's sidebar. There is no dashboard YAML to paste, no resource URL
@@ -37,6 +37,10 @@ retained. No batch migration or API-key re-entry is required.
 - **Cancel locally:** Requires an explicit confirmation tied to that batch ID and
   cancels only never-submitted ready batches and their queued order lines. Submitted
   or uncertain work must be reconciled with Zinc. This is not retailer cancellation.
+- **Shopping List activity** in Queue explains whether recent additions were queued
+  or skipped. It shows the latest 20 received additions since restart, without saving
+  a permanent activity history. Expand the catalog summary to check names, aliases,
+  retailer and enabled state. A missing built-in Shopping List source is shown explicitly.
 - **Reload:** Reads the currently saved Reorder state; it does not refresh Zinc orders.
 - **Settings:** Opens the existing Reorder integration configuration.
 
@@ -95,3 +99,26 @@ is synthetic and is not evidence of installation in a user's Home Assistant inst
 The backend tests verify admin authorization, the credential-free response schema,
 panel/cache registration, unload/reload behavior, and existing purchasing safeguards.
 CI runs the backend and dependency-free frontend suites; browser tests are optional.
+
+## If adding a Shopping List item does not queue it
+
+1. Use Home Assistant's built-in **Shopping List**; arbitrary other to-do integrations
+   are not monitored. Queue shows whether that source is configured and loaded.
+2. Expand **Configured product names and aliases** and check the exact name/alias,
+   enabled state, and retailer. Matching ignores case and extra spaces, but does not
+   use fuzzy/substring matching. Zinc batches include Zinc products only.
+3. Add a fresh item, then inspect **Shopping List activity**. Items added before the
+   upgrade/restart are not automatically replayed. Removing and re-adding an item
+   produces a new addition event without deleting any order history.
+4. Follow the displayed reason. Existing queued, active, completed, or uncertain
+   orders retain their current duplicate protection. Do not clear storage or resubmit
+   uncertain orders to get around it. A real submission can still trigger cooldown.
+
+A canceled local batch/order has never been sent to Zinc. In v0.5.1 it no longer
+blocks a *fresh* item through cooldown, but its original Shopping List item remains
+seen and its original order stays canceled. This is not an automatic retry or an
+automatic restoration of canceled work. A queued `other`/`kroger` product is still
+catalog-only: activity explains why it does not appear in the next Zinc batch.
+
+End-to-end tests exercise both `shopping_list.add_item` and the built-in
+`todo.add_item` UI path with exact names/aliases, rather than only calling the matcher.

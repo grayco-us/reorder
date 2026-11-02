@@ -35,6 +35,7 @@ class ReorderEngine:
         self.hass, self.store = hass, store
         self.lock = asyncio.Lock()
         self.selected_batch_id = None
+        self.intake_events = []
 
     def publish(self):
         self.hass.bus.async_fire(EVENT_UPDATED)
@@ -60,32 +61,52 @@ class ReorderEngine:
             await self.store.save()
         self.publish()
 
+    def _record_intake(self, item, reason, message, order_id=None):
+        """Bounded, per-run diagnostics; never store entire Shopping List payloads."""
+        event = {"name": item.get("name", ""), "reason": reason, "message": message,
+                 "created_at": dt_util.utcnow().isoformat(), "order_id": order_id}
+        self.intake_events.insert(0, event)
+        del self.intake_events[20:]
+        self.publish()
+        return event
+
     async def match_new_item(self, item):
-        if not isinstance(item, dict) or not item.get("name") or item.get("complete"):
+        if not isinstance(item, dict):
             return
+        if not isinstance(item.get("name"), str) or not item["name"].strip() or item.get("complete"):
+            return self._record_intake(item, "ignored", "The item is empty or already complete.")
         label = norm(item["name"])
         item_id = str(item.get("id") or "")
         if not item_id:
             _LOGGER.warning("Ignoring shopping-list item missing id")
-            return
+            return self._record_intake(item, "invalid_item", "The Shopping List item has no ID.")
         async with self.lock:
             if item_id in self.store.data["seen_items"]:
-                return
-            matches = [p for key, p in self.store.data["products"].items()
-                       if p["enabled"] and label in {key, *p["aliases"]}]
-            # Avoid ambiguity if aliases overlap between products.
+                return self._record_intake(item, "already_seen", "This Shopping List item was already queued; no duplicate was created.")
+            candidates = [product for key, product in self.store.data["products"].items()
+                          if label in {key, *product["aliases"]}]
+            matches = [product for product in candidates if product["enabled"]]
+            if not matches:
+                if candidates:
+                    return self._record_intake(item, "disabled", "The matching catalog product is disabled. Enable it in Reorder settings.")
+                return self._record_intake(item, "no_match", "No enabled catalog name or alias matches this item. Add its exact name or alias in Reorder settings.")
             if len(matches) != 1:
-                return
+                return self._record_intake(item, "ambiguous", "More than one enabled product matches this name or alias. Make the catalog aliases unique.")
             product = matches[0]
             now = dt_util.utcnow()
-            prior = [o for o in self.store.data["orders"].values() if o["product_key"] == norm(product["name"])]
-            blocked = any(o["status"] in ({"queued", "approved"} | ACTIVE_PURCHASE_STATUSES) for o in prior)
-            if not blocked:
-                cutoff = now - timedelta(hours=product["cooldown_hours"])
-                blocked = any(o["created_at"] >= cutoff.isoformat() for o in prior)
-            if blocked:
-                _LOGGER.info("Skipped duplicate/cooldown order for %s", product["name"])
-                return
+            prior = [order for order in self.store.data["orders"].values()
+                     if order["product_key"] == norm(product["name"])]
+            active = next((order for order in prior if order["status"] in
+                           ({"queued", "approved"} | ACTIVE_PURCHASE_STATUSES)), None)
+            if active:
+                return self._record_intake(item, "existing_order", f"Existing order {active['id']} has status {active['status']}. Review it before creating another.", active["id"])
+            cutoff = now - timedelta(hours=product["cooldown_hours"])
+            # A never-submitted local cancellation must not start a purchase cooldown.
+            recent = next((order for order in prior if order["created_at"] >= cutoff.isoformat()
+                           and not (order["status"] == "canceled" and "zinc_environment" not in order
+                                    and not order.get("zinc_order_id"))), None)
+            if recent:
+                return self._record_intake(item, "cooldown", f"The product's {product['cooldown_hours']}-hour cooldown is still active after order {recent['id']}.", recent["id"])
             order_id = uuid4().hex[:12]
             self.store.data["orders"][order_id] = {
                 "id": order_id, "product_key": norm(product["name"]),
@@ -96,15 +117,26 @@ class ReorderEngine:
                 "shopping_item_id": item_id, "created_at": now.isoformat(),
                 "note": "Queued locally; no retailer API was called.",
             }
+            previous_seen = list(self.store.data["seen_items"])
             self.store.data["seen_items"].append(item_id)
             self.store.data["seen_items"] = self.store.data["seen_items"][-2000:]
-            await self.store.save()
-        self.publish()
+            try:
+                await self.store.save()
+            except Exception:
+                self.store.data["orders"].pop(order_id, None)
+                self.store.data["seen_items"] = previous_seen
+                self._record_intake(item, "storage_error", "The queued order could not be saved. Check Home Assistant logs; no purchase was attempted.")
+                raise
+        message = f"Queued locally as {order_id}. No purchase was made."
+        if product["retailer"] != "zinc":
+            message += f" This product uses {product['retailer']} and is not eligible for Zinc batches."
+        result = self._record_intake(item, "queued", message, order_id)
         async_notify(
             self.hass,
             f"{product['name']} matched your auto-reorder catalog. "
             f"Queued as {order_id}; no purchase was made.",
             title="Reorder — test order", notification_id=f"reorder_{order_id}")
+        return result
 
     async def queue_next_substitution(self, order_id):
         """Prepare a replacement only for a confirmed out-of-stock order.

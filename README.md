@@ -2,6 +2,20 @@
 
 Home Assistant custom integration for routing exact, preapproved shopping-list items to a persistent order queue, with **Zinc API submission (sandbox first)**.
 
+## v0.5.1: Explain Shopping List intake
+
+The sidebar Queue tab now shows the most recent Shopping List matching outcomes:
+queued, unmatched, disabled, ambiguous, already processed, blocked by an existing
+order, cooldown, or save failure. It also shows configured product names/aliases and
+whether the built-in Shopping List integration is loaded. Activity is limited to the
+latest 20 received additions in memory and clears when Reorder restarts.
+
+A never-submitted local cancellation no longer starts a purchase cooldown: adding a
+fresh Shopping List item can queue that product again. The canceled order itself
+remains canceled. Seen-item deduplication, active/uncertain-order guards, real
+submission cooldowns, and all purchasing confirmations are unchanged. Failed queue
+saves restore the order/seen-item state rather than leaving a phantom queued order.
+
 ## v0.5.0: Reorder in the Home Assistant sidebar
 
 Reorder now includes a bundled sidebar app: batch lists and inline product review,
