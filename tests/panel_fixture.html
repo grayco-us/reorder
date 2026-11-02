@@ -1,0 +1,35 @@
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Reorder sidebar fixture</title><style>html,body{margin:0;height:100%;font-family:system-ui,sans-serif}</style></head><body><script type="module">
+import { makePanelData } from './panel-fixture.mjs';
+import '../custom_components/reorder/www/reorder-panel.js';
+window.snapshot = makePanelData();
+window.reorderCalls = [];
+window.subscribers = new Set();
+const panel = document.createElement('reorder-panel');
+panel.panel = { config: { entry_id: 'fixture' } };
+panel.hass = {
+  language: 'en-US', config: { time_zone: 'America/New_York' },
+  connection: { subscribeEvents(callback) { window.subscribers.add(callback); return Promise.resolve(() => window.subscribers.delete(callback)); } },
+  async callWS(message) {
+    window.reorderCalls.push(message);
+    if (message.type === 'reorder/panel') return structuredClone(window.snapshot);
+    if (window.failNextAction) { window.failNextAction = false; throw { message: 'Simulated network failure' }; }
+    const batch = window.snapshot.batches.find(item => item.id === message.service_data.batch_id);
+    if (message.service === 'cancel_batch') {
+      if (!batch?.can_cancel) throw { message: 'Cancellation is not allowed' };
+      Object.assign(batch, { status: 'canceled', status_label: 'Canceled', can_cancel: false, canceled_at: '2026-11-02T14:00:00Z' });
+    } else if (message.service === 'refresh_batch_zinc') {
+      if (!batch?.can_refresh) throw { message: 'Refresh is not allowed' };
+      batch.last_refreshed_at = '2026-11-02T14:00:00Z';
+    } else if (message.service === 'prepare_batch') {
+      const newBatch = { id: 'prepared-in-app', status: 'ready', status_label: 'Ready for review', created_at: '2026-11-02T14:00:00Z', max_price: window.snapshot.queue.price_ceiling, can_cancel: true, can_refresh: false, review_error: null, orders: structuredClone(window.snapshot.queue.orders) };
+      window.snapshot.batches.unshift(newBatch);
+      window.snapshot.queue = { count: 0, orders: [], price_ceiling: 0 };
+      return { response: newBatch };
+    } else throw { message: 'Unexpected service; fixture forbids purchasing' };
+    return { response: structuredClone(batch) };
+  },
+};
+document.body.append(panel);
+window.panel = panel;
+window.pushSnapshot = () => { for (const callback of window.subscribers) callback({}); };
+</script></body></html>

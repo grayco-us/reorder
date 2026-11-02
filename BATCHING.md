@@ -1,4 +1,4 @@
-# Reorder v0.4.5 — Batch testing
+# Reorder v0.5.0 — Batch testing
 
 **Development preview. No scheduled payments.** A weekly/rolling schedule only creates a persistent batch marked `ready`.
 
@@ -177,3 +177,11 @@ labels are readable and times use Home Assistant's local timezone. Re-import the
 updated YAML after deploying v0.4.5; it does not overwrite customized dashboards.
 Existing notification-based review remains supported, with no changes to saved
 batch status values, entity IDs, or purchasing safeguards.
+
+## Automatic sidebar app (v0.5.0)
+
+The recommended interface is now [Reorder in the sidebar](SIDEBAR.md). It is bundled
+with the integration and registered on startup, with no dashboard to create. Review
+saved batches inline, prepare queued products locally, refresh status, or confirm a
+local cancellation. The existing submission actions retain their safeguards; no
+purchase control is included in the app. Old dashboards and entities remain usable.

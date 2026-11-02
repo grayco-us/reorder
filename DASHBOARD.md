@@ -1,4 +1,8 @@
-# Reorder dashboard
+# Legacy Reorder dashboard
+
+For v0.5.0 and later, the [automatic sidebar app](SIDEBAR.md) is the recommended
+interface and needs no dashboard YAML. This guide remains for existing dashboards
+and users who prefer native cards.
 
 The starter dashboard uses only built-in Home Assistant cards and Reorder's native
 entities. It has no purchase/submit control and needs no custom frontend plugin.

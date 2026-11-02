@@ -727,6 +727,96 @@ class BatchActionsTest(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("2026-11-02T13:55", rendered)
         self.assertIn("Submitted", rendered)
 
+    async def test_sidebar_is_automatically_registered_with_versioned_assets(self):
+        from homeassistant.components import frontend
+        panel = self.hass.data[frontend.DATA_PANELS]["reorder-app"]
+        self.assertEqual(panel.sidebar_title, "Reorder")
+        self.assertTrue(panel.require_admin)
+        self.assertEqual(panel.config["entry_id"], self.entry.entry_id)
+        self.assertEqual(panel.config["_panel_custom"]["module_url"], "/reorder-assets/reorder-panel.js?v=0.5.0")
+        self.assertEqual(panel.config["_panel_custom"]["name"], "reorder-panel")
+
+    async def test_sidebar_snapshot_excludes_credentials_and_preserves_data(self):
+        import json
+        from custom_components.reorder.frontend import panel_data
+        batch = await self.prepare()
+        before = deepcopy(self.engine.store.data)
+        data = panel_data(self.engine, self.entry)
+        self.assertEqual(data["mode"], "Sandbox")
+        self.assertEqual(data["batches"][0]["id"], batch["id"])
+        self.assertEqual(data["batches"][0]["orders"][0]["name"], "Product 1")
+        self.assertTrue(data["batches"][0]["can_cancel"])
+        self.assertFalse(data["batches"][0]["can_refresh"])
+        serialized = json.dumps(data)
+        for private in ("zinc_api_key", "shipping_address", "ship_first_name", "zn_test_not-a-real-key", "test-only"):
+            self.assertNotIn(private, serialized)
+        data["batches"][0]["orders"][0]["quantity"] = 99
+        self.assertEqual(self.engine.store.data, before)
+        self.transport.assert_not_awaited()
+
+    async def test_sidebar_websocket_requires_admin_and_loaded_entry(self):
+        from types import SimpleNamespace
+        from custom_components.reorder.frontend import websocket_panel
+        handler = websocket_panel.__wrapped__
+        for user in (None, SimpleNamespace(is_admin=False)):
+            connection = MagicMock(user=user)
+            await handler(self.hass, connection, {"id": 1, "entry_id": self.entry.entry_id})
+            connection.send_error.assert_called_once_with(1, "unauthorized", "Administrator access is required")
+            connection.send_result.assert_not_called()
+        connection = MagicMock(user=SimpleNamespace(is_admin=True))
+        await handler(self.hass, connection, {"id": 2, "entry_id": "missing"})
+        connection.send_error.assert_called_once_with(2, "not_found", "Reorder is not loaded")
+        connection.send_result.assert_not_called()
+        self.transport.assert_not_awaited()
+
+    async def test_sidebar_websocket_snapshot_needs_no_zinc_credentials(self):
+        from types import SimpleNamespace
+        from custom_components.reorder.frontend import websocket_panel
+        self.hass.config_entries.async_update_entry(self.entry, options={})
+        batch = await self.prepare()
+        connection = MagicMock(user=SimpleNamespace(is_admin=True))
+        await websocket_panel.__wrapped__(self.hass, connection, {"id": 3, "entry_id": self.entry.entry_id})
+        args = connection.send_result.call_args.args
+        self.assertEqual(args[0], 3)
+        self.assertEqual(args[1]["mode"], "Not configured")
+        self.assertEqual(args[1]["batches"][0]["id"], batch["id"])
+        self.transport.assert_not_awaited()
+
+    async def test_sidebar_unregisters_and_reregisters_on_reload(self):
+        from homeassistant.components import frontend
+        self.assertTrue(await self.hass.config_entries.async_unload(self.entry.entry_id))
+        self.assertNotIn("reorder-app", self.hass.data[frontend.DATA_PANELS])
+        self.assertTrue(await self.hass.config_entries.async_setup(self.entry.entry_id))
+        await self.hass.async_block_till_done()
+        self.assertIn("reorder-app", self.hass.data[frontend.DATA_PANELS])
+
+    async def test_sidebar_does_not_replace_or_remove_an_unrelated_panel(self):
+        from homeassistant.components import frontend
+        from custom_components.reorder.frontend import async_setup_panel, async_remove_panel
+        frontend.async_register_built_in_panel(self.hass, component_name="config", frontend_url_path="reorder-app", sidebar_title="Existing panel", update=True)
+        with self.assertRaisesRegex(ValueError, "will not replace"):
+            await async_setup_panel(self.hass, self.entry)
+        async_remove_panel(self.hass, self.entry)
+        self.assertEqual(self.hass.data[frontend.DATA_PANELS]["reorder-app"].sidebar_title, "Existing panel")
+
+    async def test_sidebar_reflects_refresh_without_allowing_local_cancellation(self):
+        from custom_components.reorder.frontend import panel_data
+        batch = await self.prepare()
+        await self.submit(batch)
+        data = panel_data(self.engine, self.entry)
+        self.assertTrue(data["batches"][0]["can_refresh"])
+        self.assertFalse(data["batches"][0]["can_cancel"])
+        self.hass.config_entries.async_update_entry(self.entry, options=self.options | {"zinc_api_key": "zn_live_not-a-real-key", "zinc_live_enabled": True})
+        data = panel_data(self.engine, self.entry)
+        self.assertEqual(data["mode"], "Live enabled")
+        self.assertFalse(data["batches"][0]["can_refresh"])
+
+    async def test_sidebar_disables_cancel_when_a_member_order_was_attempted(self):
+        from custom_components.reorder.frontend import panel_data
+        await self.prepare()
+        self.engine.store.data["orders"]["1"]["zinc_environment"] = "sandbox"
+        self.assertFalse(panel_data(self.engine, self.entry)["batches"][0]["can_cancel"])
+
     async def test_missing_shipping_address_blocks_submission(self):
         batch = await self.prepare()
         self.hass.config_entries.async_update_entry(self.entry, options={"zinc_api_key": "zn_test_not-a-real-key"})

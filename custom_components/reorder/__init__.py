@@ -1,9 +1,12 @@
 """Reorder: shopping list order queue with optional Zinc integration."""
+import logging
+
 from homeassistant.core import HomeAssistant, ServiceCall, ServiceResponse, SupportsResponse, callback
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import config_validation as cv
 import voluptuous as vol
+from .frontend import async_remove_panel, async_setup_panel
 from .notifications import async_notify
 from .const import DOMAIN
 from .store import ReorderStore
@@ -14,6 +17,8 @@ from homeassistant.helpers.event import async_track_time_interval
 from datetime import timedelta
 from homeassistant.util import dt as dt_util
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+
+_LOGGER = logging.getLogger(__name__)
 
 PRODUCT_SCHEMA = vol.Schema({
     vol.Required("name"): cv.string,
@@ -255,11 +260,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.services.async_register(DOMAIN, "cancel_order", cancel_order,
                                  schema=vol.Schema({vol.Required("order_id"): cv.string}))
     await hass.config_entries.async_forward_entry_setups(entry, ["sensor", "select", "button"])
+    try:
+        await async_setup_panel(hass, entry)
+    except Exception:
+        # Existing services and automations remain usable if frontend setup fails.
+        _LOGGER.exception("Reorder sidebar could not be registered; existing actions remain available")
     return True
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if not await hass.config_entries.async_unload_platforms(entry, ["sensor", "select", "button"]):
         return False
+    async_remove_panel(hass, entry)
     for service in ("set_product", "remove_product", "approve_order", "cancel_order", "submit_zinc", "refresh_zinc", "queue_next_substitution", "preview_batch", "prepare_batch", "submit_batch_zinc", "refresh_batch_zinc", "review_batch", "cancel_batch"):
         hass.services.async_remove(DOMAIN, service)
     hass.data[DOMAIN].pop(entry.entry_id, None)

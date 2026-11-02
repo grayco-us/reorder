@@ -2,6 +2,20 @@
 
 Home Assistant custom integration for routing exact, preapproved shopping-list items to a persistent order queue, with **Zinc API submission (sandbox first)**.
 
+## v0.5.0: Reorder in the Home Assistant sidebar
+
+Reorder now includes a bundled sidebar app: batch lists and inline product review,
+queue preparation, provider-status refresh, and confirmed local cancellation. No
+manual dashboard YAML, custom card installation, or frontend build is required.
+It adapts to desktop and mobile, uses Home Assistant themes and local time, and keeps
+batch selection local to each browser. There is no purchase control in the app.
+
+Deploy the update, restart Home Assistant, refresh your browser, and open **Reorder**
+in the sidebar as an administrator. Existing configuration, stored orders, entities,
+and actions are retained. The old dashboard is optional and is not removed or
+modified automatically. See the [sidebar app guide](SIDEBAR.md) for access, testing,
+upgrade details and current limitations.
+
 ## v0.4.5: Review batch contents inline
 
 Selecting a batch now displays its saved products, clickable product links,
