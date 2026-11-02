@@ -1,4 +1,4 @@
-# Reorder sidebar app (v0.8.0)
+# Reorder sidebar app (v0.8.1)
 
 Reorder now bundles its own responsive frontend and automatically adds **Reorder**
 to Home Assistant's sidebar. There is no dashboard YAML to paste, no resource URL
@@ -148,3 +148,10 @@ partial fulfillment and reported totals appear after refresh. Explicit selected 
 can check off exact linked list IDs. Confirmed delivered lines now complete their
 original list IDs automatically by default; placement never implies delivery. Settings
 provides an independent switch to keep receipt manual. Missing/mismatched provider details disable automated list completion.
+
+## Live-trial guidance
+
+The mode notice explains Sandbox, Live disabled and Live enabled. Expand **What these
+terms mean** for queue/batch states, ceilings, delivery, list completion and recovery.
+See [LIVE_TESTING.md](LIVE_TESTING.md) for the native action used for a first real order.
+The app has no live submit button; purchasing controls and safeguards are unchanged.

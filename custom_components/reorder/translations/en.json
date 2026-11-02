@@ -41,20 +41,20 @@
           "substitute_1": "First substitute (optional)",
           "substitute_2": "Second substitute (optional)",
           "quantity": "Units per order",
-          "max_price": "Maximum total order cost (USD)",
-          "cooldown_hours": "Minimum time between orders (hours)",
+          "max_price": "Product contribution to order ceiling (USD)",
+          "cooldown_hours": "Repeat-request cooldown (hours)",
           "enabled": "Enable shopping-list matching"
         },
         "data_description": {
-          "name": "Name on your shopping list, such as Coffee.",
+          "name": "Exact Shopping List name to match, ignoring case and extra spaces. Names with order history stay fixed; use aliases for new matching names.",
           "aliases": "Alternative shopping-list names, separated by commas. For example: coffee beans, ground coffee.",
           "retailer": "Zinc supports purchasing. Kroger and Other are catalog placeholders in this release.",
           "product_id": "For Zinc, enter the full retailer product URL. For Kroger, use the product identifier/UPC.",
-          "substitute_1": "Alternative product URL to try if the preferred product is confirmed out of stock.",
-          "substitute_2": "Another approved product URL if the first substitute is also unavailable.",
-          "quantity": "Number of units to order each time. Example: 2 bags of coffee.",
-          "max_price": "Maximum combined amount for the order, including shipping and tax; also applies to substitutions.",
-          "cooldown_hours": "Prevent repeat orders within this period. 168 hours equals 7 days.",
+          "substitute_1": "Optional approved HTTPS alternative. Only the standalone out-of-stock workflow can queue it; batches never switch products automatically.",
+          "substitute_2": "Second optional alternative for that manual standalone workflow. Saving it does not order a replacement.",
+          "quantity": "Fixed retailer units for each matching list entry. Shopping List text does not change this quantity. Check the retailer pack size before ordering.",
+          "max_price": "USD allowance for the configured quantity, including tax and shipping. Batch submission adds these allowances into one total cap; Zinc does not enforce a separate cap per product line. This is not a price quote.",
+          "cooldown_hours": "Blocks repeat requests. Confirmed delivery or recorded receipt starts the cooldown from its first observation; pending or uncertain purchases remain blocked. 168 hours = 7 days.",
           "enabled": "Turn off to stop Reorder from matching this catalog entry."
         }
       },
@@ -77,21 +77,21 @@
           "substitute_1": "First substitute (optional)",
           "substitute_2": "Second substitute (optional)",
           "quantity": "Units per order",
-          "max_price": "Maximum total order cost (USD)",
-          "cooldown_hours": "Minimum time between orders (hours)",
+          "max_price": "Product contribution to order ceiling (USD)",
+          "cooldown_hours": "Repeat-request cooldown (hours)",
           "enabled": "Enable shopping-list matching"
         },
         "description": "Set what Reorder should match and queue. Saving this product does not place an order.",
         "data_description": {
-          "name": "Name on your shopping list, such as Coffee.",
+          "name": "Exact Shopping List name to match, ignoring case and extra spaces. Names with order history stay fixed; use aliases for new matching names.",
           "aliases": "Alternative shopping-list names, separated by commas. For example: coffee beans, ground coffee.",
           "retailer": "Zinc supports purchasing. Kroger and Other are catalog placeholders in this release.",
           "product_id": "For Zinc, enter the full retailer product URL. For Kroger, use the product identifier/UPC.",
-          "substitute_1": "Alternative product URL to try if the preferred product is confirmed out of stock.",
-          "substitute_2": "Another approved product URL if the first substitute is also unavailable.",
-          "quantity": "Number of units to order each time. Example: 2 bags of coffee.",
-          "max_price": "Maximum combined amount for the order, including shipping and tax; also applies to substitutions.",
-          "cooldown_hours": "Prevent repeat orders within this period. 168 hours equals 7 days.",
+          "substitute_1": "Optional approved HTTPS alternative. Only the standalone out-of-stock workflow can queue it; batches never switch products automatically.",
+          "substitute_2": "Second optional alternative for that manual standalone workflow. Saving it does not order a replacement.",
+          "quantity": "Fixed retailer units for each matching list entry. Shopping List text does not change this quantity. Check the retailer pack size before ordering.",
+          "max_price": "USD allowance for the configured quantity, including tax and shipping. Batch submission adds these allowances into one total cap; Zinc does not enforce a separate cap per product line. This is not a price quote.",
+          "cooldown_hours": "Blocks repeat requests. Confirmed delivery or recorded receipt starts the cooldown from its first observation; pending or uncertain purchases remain blocked. 168 hours = 7 days.",
           "enabled": "Turn off to stop Reorder from matching this catalog entry."
         }
       },
@@ -106,7 +106,7 @@
       },
       "zinc_settings": {
         "title": "Zinc settings",
-        "description": "Use a zn_test_ key for sandbox orders. Live mode permits actual spending only through an explicitly confirmed action. Shipping details remain in Home Assistant storage.",
+        "description": "Sandbox uses zn_test_ credentials and simulated orders. Live uses zn_live_ credentials and can spend real money only after live purchasing is enabled and an action is explicitly confirmed. The sidebar submits Sandbox batches only. Changing keys does not convert or cancel saved orders.",
         "data": {
           "zinc_api_key": "Zinc API key",
           "zinc_live_enabled": "Enable live Zinc purchasing",
@@ -119,8 +119,8 @@
           "ship_phone_number": "Phone number"
         },
         "data_description": {
-          "zinc_api_key": "Use a Zinc sandbox key while testing. Keep API keys out of Git.",
-          "zinc_live_enabled": "Leave off during development. Enabling live mode can permit real orders through a separately confirmed action.",
+          "zinc_api_key": "Choose the intended Zinc account and environment. Only records matching the current key environment can refresh. Read-only batch tracking continues with a live key even when live purchasing is off. Never share this key.",
+          "zinc_live_enabled": "Allows native live submission with the exact phrase PLACE LIVE ORDER. It does not submit anything, enable scheduled purchasing, or add a live submit button to the sidebar. Turn off again after the trial to prevent new live submissions.",
           "ship_first_name": "Recipient given name.",
           "ship_last_name": "Recipient family name.",
           "ship_address_line1": "Street address for shipping.",
@@ -132,7 +132,7 @@
       },
       "batch_settings": {
         "title": "Batching schedule",
-        "description": "Scheduled and rolling modes ONLY prepare a batch for review; they never purchase automatically. Monday=0, Sunday=6. Time uses Home Assistant local time.",
+        "description": "Schedules prepare local batches for review; they never purchase. Status tracking and delivery completion are separate. Manage source synchronization and automatic delivery completion on the Reorder sidebar Settings page. Monday=0, Sunday=6; times use Home Assistant local time.",
         "data": {
           "strategy": "Batching strategy",
           "weekday": "Day of week (Monday 0, Sunday 6)",

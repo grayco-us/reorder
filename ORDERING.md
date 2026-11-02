@@ -1,9 +1,11 @@
-# Sandbox ordering, tracking, and Shopping List receipt (v0.8.0)
+# Sandbox ordering, tracking, and Shopping List receipt (v0.8.1)
 
 The sidebar now supports the next stage of the workflow: explicitly submit a **sandbox**
 batch, retrieve item/fulfillment/tracking details, and automatically check off linked Shopping List items after confirmed per-item delivery.
 Explicit selected receipt remains available for testing or manual management. The app still has **no live-purchase control**. Existing
 manual live actions retain their original opt-in and confirmation safeguards.
+
+For a user-run first real purchase, use [LIVE_TESTING.md](LIVE_TESTING.md).
 
 ## Success-path test
 
@@ -79,8 +81,8 @@ or failed list updates remain retryable. Only the current key’s environment is
 Read-only polling does not require shipping details or permission to place live orders.
 Legacy standalone orders still use their existing manual refresh action.
 
-For existing manually submitted **live** orders, list completion is available only
-automatically for uniquely matched, explicitly provider-delivered batch items.
+For manually submitted **live** batches, automatic list completion requires uniquely
+matched, provider-confirmed delivered items.
 Manual receipt additionally requires matching configured live mode and the separate
 **ITEMS RECEIVED** confirmation. It never submits a purchase.
 A partial/failed aggregate order can still have a confirmed delivered line, but failed

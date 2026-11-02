@@ -2,6 +2,16 @@
 
 Home Assistant custom integration for routing exact, preapproved shopping-list items to a persistent order queue, with **Zinc API submission (sandbox first)**.
 
+## v0.8.1: First live-trial guidance
+
+Mode-specific helper text, state definitions and action/field descriptions now explain
+what submits a purchase, which IDs to use, how the combined ceiling works, and when
+Shopping List completion happens. Native approve/cancel labels describe local work
+rather than calling it simulated. Purchasing behavior and safeguards are unchanged.
+Follow [the first live-trial guide](LIVE_TESTING.md) for one user-run order, status and
+delivery checks, and recovery if submission is uncertain. The sidebar still submits
+Sandbox batches only; live submission requires the existing separately confirmed action.
+
 ## v0.8.0: Delivery completes the Shopping List
 
 Tracked batches now refresh automatically every 15 minutes (GET only, at most ten

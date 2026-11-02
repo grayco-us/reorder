@@ -733,7 +733,7 @@ class BatchActionsTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(panel.sidebar_title, "Reorder")
         self.assertTrue(panel.require_admin)
         self.assertEqual(panel.config["entry_id"], self.entry.entry_id)
-        self.assertEqual(panel.config["_panel_custom"]["module_url"], "/reorder-assets/reorder-panel.js?v=0.8.0")
+        self.assertEqual(panel.config["_panel_custom"]["module_url"], "/reorder-assets/reorder-panel.js?v=0.8.1")
         self.assertEqual(panel.config["_panel_custom"]["name"], "reorder-panel")
 
     async def test_sidebar_snapshot_excludes_credentials_and_preserves_data(self):
