@@ -123,24 +123,41 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             title="Reorder — Batch Ready", notification_id=f"reorder_batch_{batch['id']}")
         return dict(batch)
 
-    async def submit_batch(call: ServiceCall):
+    def notify_batch_status(report, operation):
+        mode = "Sandbox simulation" if report["zinc_environment"] == "sandbox" else "Live order"
+        async_notify(
+            hass,
+            f"Batch {report['id']}: {report['status']}. {mode}. "
+            f"Zinc order ID: {report['zinc_order_id']}. "
+            "See Prepared batches attributes for saved details.",
+            title=f"Reorder — Batch {operation}",
+            notification_id=f"reorder_batch_{report['id']}",
+        )
+
+    async def submit_batch(call: ServiceCall) -> ServiceResponse:
         client, address, sandbox = zinc_settings()
         if call.data["confirmation"] != ("SANDBOX" if sandbox else "PLACE LIVE ORDER"):
             raise HomeAssistantError("Explicit confirmation phrase required")
         try:
-            await engine.submit_batch_zinc(call.data["batch_id"], client, address, sandbox)
+            report = await engine.submit_batch_zinc(call.data["batch_id"], client, address, sandbox)
         except ValueError as err:
             raise HomeAssistantError(str(err)) from err
 
-    async def refresh_batch(call: ServiceCall):
+        notify_batch_status(report, "Submitted")
+        return report
+
+    async def refresh_batch(call: ServiceCall) -> ServiceResponse:
         client, _, sandbox = zinc_settings()
         batch = store.data.get("batches", {}).get(call.data["batch_id"])
         if not batch or batch.get("zinc_environment") != ("sandbox" if sandbox else "live"):
             raise HomeAssistantError("Batch not found in current environment")
         try:
-            await engine.refresh_batch_zinc(call.data["batch_id"], client)
+            report = await engine.refresh_batch_zinc(call.data["batch_id"], client)
         except ValueError as err:
             raise HomeAssistantError(str(err)) from err
+
+        notify_batch_status(report, "Refreshed")
+        return report
 
     async def check_scheduled(_now):
         settings = store.data.get("batch_settings", {})
@@ -171,9 +188,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         vol.Optional("max_items", default=10): vol.All(vol.Coerce(int), vol.Range(min=1, max=10))}),
         supports_response=SupportsResponse.OPTIONAL)
     hass.services.async_register(DOMAIN, "submit_batch_zinc", submit_batch, schema=vol.Schema({
-        vol.Required("batch_id"): cv.string, vol.Required("confirmation"): cv.string}))
+        vol.Required("batch_id"): cv.string, vol.Required("confirmation"): cv.string}),
+        supports_response=SupportsResponse.OPTIONAL)
     hass.services.async_register(DOMAIN, "refresh_batch_zinc", refresh_batch, schema=vol.Schema({
-        vol.Required("batch_id"): cv.string}))
+        vol.Required("batch_id"): cv.string}),
+        supports_response=SupportsResponse.OPTIONAL)
 
     hass.services.async_register(DOMAIN, "queue_next_substitution", next_substitution,
                                  schema=vol.Schema({vol.Required("order_id"): cv.string}))

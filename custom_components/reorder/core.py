@@ -7,7 +7,7 @@ from urllib.parse import urlparse
 from homeassistant.core import callback
 from homeassistant.util import dt as dt_util
 from .notifications import async_notify
-from .const import EVENT_UPDATED
+from .const import ACTIVE_PURCHASE_STATUSES, EVENT_UPDATED
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -78,7 +78,7 @@ class ReorderEngine:
             product = matches[0]
             now = dt_util.utcnow()
             prior = [o for o in self.store.data["orders"].values() if o["product_key"] == norm(product["name"])]
-            blocked = any(o["status"] in ("queued", "approved", "submitting", "submitted", "in_progress", "order_placed", "submission_unknown") for o in prior)
+            blocked = any(o["status"] in ({"queued", "approved"} | ACTIVE_PURCHASE_STATUSES) for o in prior)
             if not blocked:
                 cutoff = now - timedelta(hours=product["cooldown_hours"])
                 blocked = any(o["created_at"] >= cutoff.isoformat() for o in prior)
@@ -162,7 +162,7 @@ class ReorderEngine:
                 raise ValueError("Order is not assigned to Zinc")
             if not order["product_id"].startswith("https://"):
                 raise ValueError("Zinc requires a full HTTPS product URL")
-            if any(o["product_key"] == order["product_key"] and o["status"] in ("submitting", "submitted", "in_progress", "order_placed", "submission_unknown") for o in self.store.data["orders"].values() if o["id"] != order_id):
+            if any(o["product_key"] == order["product_key"] and o["status"] in ACTIVE_PURCHASE_STATUSES for o in self.store.data["orders"].values() if o["id"] != order_id):
                 raise ValueError("Another order for this product is already active")
             order["status"] = "submitting"
             order["note"] = "Submission started; do not retry blindly if the connection fails."
@@ -200,7 +200,7 @@ class ReorderEngine:
             code = (error.get("code") if isinstance(error, dict) else None) or result.get("error_code")
             # Only an explicitly failed order with Zinc's documented stock error
             # can enter replacement workflow. Never infer this from an HTTP error.
-            if status == "failed" and code == "out_of_stock":
+            if status in ("failed", "order_failed") and code in ("out_of_stock", "product_out_of_stock"):
                 order["status"] = "out_of_stock"
                 order["note"] = "Zinc confirmed out_of_stock; approved replacement can be queued."
             else:
@@ -223,7 +223,7 @@ class ReorderEngine:
                 raise ValueError("Batch must contain 1–10 distinct catalog products")
             product_keys = {o["product_key"] for o in orders}
             if any(o["product_key"] in product_keys and o["id"] not in batch["order_ids"]
-                   and o["status"] in ("submitting", "submitted", "in_progress", "order_placed", "submission_unknown")
+                   and o["status"] in ACTIVE_PURCHASE_STATUSES
                    for o in self.store.data["orders"].values()):
                 raise ValueError("Another order for a batch product is active or uncertain")
             batch["status"] = "submitting"
@@ -255,7 +255,9 @@ class ReorderEngine:
                 order["zinc_order_id"] = batch.get("zinc_order_id")
                 order["zinc_environment"] = batch["zinc_environment"]
             await self.store.save()
+            report = dict(batch)
         self.publish()
+        return report
 
     async def refresh_batch_zinc(self, batch_id, client):
         async with self.lock:
@@ -264,11 +266,18 @@ class ReorderEngine:
                 raise ValueError("Batch has no Zinc order ID")
             zinc_id = batch["zinc_order_id"]
         result = await client.get_order(zinc_id)
-        status = result.get("status", "unknown")
+        if not isinstance(result, dict) or not isinstance(result.get("status"), str) or not result["status"]:
+            raise ValueError("Zinc refresh response missing status; saved batch unchanged")
+        if result.get("id") is not None and result["id"] != zinc_id:
+            raise ValueError("Zinc refresh returned a different order ID; saved batch unchanged")
+        status = result["status"]
         async with self.lock:
             batch["status"] = status
             batch["note"] = "Refreshed with Zinc; inspect retailer status for partial failures."
+            batch["last_refreshed_at"] = dt_util.utcnow().isoformat()
             for item_id in batch["order_ids"]:
                 self.store.data["orders"][item_id]["status"] = status
             await self.store.save()
+            report = dict(batch)
         self.publish()
+        return report

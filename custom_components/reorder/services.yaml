@@ -111,7 +111,7 @@ prepare_batch:
           mode: box
 submit_batch_zinc:
   name: Submit Zinc batch
-  description: Sends a prepared batch to Zinc. Live transactions can spend money.
+  description: Sends a prepared batch to Zinc and displays its status and mode. Supports an optional saved batch response. Live transactions can spend money.
   fields:
     batch_id:
       required: true
@@ -124,6 +124,7 @@ submit_batch_zinc:
         text:
 refresh_batch_zinc:
   name: Refresh Zinc batch status
+  description: Retrieves status without submitting an order. Updates the batch notification and refresh timestamp; supports an optional saved batch response.
   fields:
     batch_id:
       required: true

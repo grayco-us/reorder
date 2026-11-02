@@ -1,4 +1,4 @@
-# Reorder v0.4.1 — Batch testing
+# Reorder v0.4.2 — Batch testing
 
 **Development preview. No scheduled payments.** A weekly/rolling schedule only creates a persistent batch marked `ready`.
 
@@ -93,3 +93,34 @@ submission uncertainty, and purchasing guards. All key strings and shipping fiel
 synthetic; tests never contact Zinc. CI runs this suite in addition to the existing
 compile, JSON, and manifest/layout checks. `tests/test_matching.py` remains a manual
 checklist and is not counted as an automated test.
+
+## Submission and refresh feedback (v0.4.2)
+
+Submission and refresh update the batch's persistent notification with its Reorder
+batch ID, raw Zinc status, Zinc order ID, and sandbox/live mode. A successful refresh
+also saves `last_refreshed_at` in the Prepared batches sensor attributes. The sensor's
+numeric state counts only batches still `ready`; it is not a count of completed orders.
+
+Both actions accept optional responses, including `id`, `status`, `zinc_environment`,
+`zinc_order_id`, and the saved batch fields. For an existing sandbox batch:
+
+```yaml
+- action: reorder.refresh_batch_zinc
+  data:
+    batch_id: YOUR_REORDER_BATCH_ID
+  response_variable: refreshed_batch
+```
+
+Use the Reorder batch ID, not the Zinc order ID. Refresh only retrieves status; it
+never creates an order. Missing/invalid status or a mismatched Zinc ID raises an error
+and preserves the saved state. A failed network request does not show a success
+notification. Notification display failures are logged without failing saved actions.
+
+The documented v2 states include `pending`, `in_progress`, `order_placed`,
+`order_failed`, `cancelled`, and `cancelled_by_retailer`. They are retained verbatim
+for batches, including failures; failed/cancelled batches cannot be resubmitted.
+Legacy states remain supported. Individual-order replacement is still manual and
+requires an explicitly failed order and an explicit top-level/nested stock error code
+(`product_out_of_stock` or legacy `out_of_stock`). Per-item `error_type` alone is not
+interpreted as whole-order stock failure. Batch replacements and partial-fulfillment
+reconciliation remain unsupported; no automatic replacements or retries were added.

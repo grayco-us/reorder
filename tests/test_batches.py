@@ -295,6 +295,116 @@ class BatchActionsTest(unittest.IsolatedAsyncioTestCase):
             await self.prepare()
         self.transport.assert_awaited_once()
 
+    async def test_submit_response_and_notification_identify_saved_batch(self):
+        batch = await self.prepare()
+        self.transport.return_value = {"id": "mock-zinc-id", "status": "pending"}
+        report = await self.call("submit_batch_zinc", {
+            "batch_id": batch["id"], "confirmation": "SANDBOX",
+        }, response=True)
+        self.assertEqual(report["id"], batch["id"])
+        self.assertEqual(report["status"], "pending")
+        notification = self.hass.data["persistent_notification"][f"reorder_batch_{batch['id']}"]
+        self.assertIn("Sandbox simulation", notification["message"])
+        self.assertIn("pending", notification["message"])
+        self.assertEqual(notification["title"], "Reorder — Batch Submitted")
+        self.transport.assert_awaited_once()
+
+    async def test_refresh_returns_saved_status_and_updates_notification(self):
+        batch = await self.prepare()
+        await self.submit(batch)
+        self.transport.reset_mock()
+        self.transport.return_value = {"id": "mock-zinc-id", "status": "order_placed"}
+        report = await self.call("refresh_batch_zinc", {"batch_id": batch["id"]}, response=True)
+        self.transport.assert_awaited_once_with("GET", "/orders/mock-zinc-id")
+        self.assertEqual(report["status"], "order_placed")
+        self.assertEqual(report["zinc_environment"], "sandbox")
+        self.assertIn("last_refreshed_at", report)
+        self.assertEqual(self.engine.store.data["orders"]["1"]["status"], "order_placed")
+        restored = ReorderStore(self.hass)
+        await restored.load()
+        self.assertEqual(restored.data["batches"][batch["id"]], report)
+        notification = self.hass.data["persistent_notification"][f"reorder_batch_{batch['id']}"]
+        self.assertIn("order_placed", notification["message"])
+        self.assertEqual(notification["title"], "Reorder — Batch Refreshed")
+
+    async def test_status_notifications_cannot_fail_saved_actions(self):
+        batch = await self.prepare()
+        with patch("custom_components.reorder.notifications.persistent_notification.async_create", side_effect=RuntimeError("display failed")):
+            with self.assertLogs("custom_components.reorder", level="WARNING"):
+                submitted = await self.call("submit_batch_zinc", {
+                    "batch_id": batch["id"], "confirmation": "SANDBOX",
+                }, response=True)
+                self.transport.return_value = {"id": "mock-zinc-id", "status": "order_placed"}
+                refreshed = await self.call("refresh_batch_zinc", {"batch_id": batch["id"]}, response=True)
+        self.assertEqual(submitted["status"], "submitted")
+        self.assertEqual(refreshed["status"], "order_placed")
+        self.assertEqual(len(self.engine.store.data["batches"]), 1)
+
+    async def test_refresh_error_preserves_state_and_previous_notification(self):
+        batch = await self.prepare()
+        await self.submit(batch)
+        before = deepcopy(self.engine.store.data)
+        notification = deepcopy(self.hass.data["persistent_notification"][f"reorder_batch_{batch['id']}"])
+        self.transport.side_effect = HomeAssistantError("Zinc returned HTTP 503")
+        with self.assertRaisesRegex(HomeAssistantError, "503"):
+            await self.call("refresh_batch_zinc", {"batch_id": batch["id"]})
+        self.assertEqual(self.engine.store.data, before)
+        self.assertEqual(self.hass.data["persistent_notification"][f"reorder_batch_{batch['id']}"], notification)
+
+    async def test_malformed_refresh_does_not_replace_known_status(self):
+        batch = await self.prepare()
+        await self.submit(batch)
+        before = deepcopy(self.engine.store.data)
+        for response in ({}, [], {"status": None}, {"status": ""}, {"id": "another-order", "status": "order_placed"}):
+            with self.subTest(response=response):
+                self.transport.return_value = response
+                with self.assertRaises(HomeAssistantError):
+                    await self.call("refresh_batch_zinc", {"batch_id": batch["id"]})
+                self.assertEqual(self.engine.store.data, before)
+
+    async def test_ready_batch_refresh_requires_zinc_id(self):
+        batch = await self.prepare()
+        # A never-submitted batch has no matching Zinc environment.
+        with self.assertRaisesRegex(HomeAssistantError, "current environment"):
+            await self.call("refresh_batch_zinc", {"batch_id": batch["id"]})
+        self.transport.assert_not_awaited()
+
+    async def test_pending_order_blocks_another_purchase_for_same_product(self):
+        batch = await self.prepare()
+        previous = order(2) | {"product_key": "product 1", "status": "pending"}
+        self.engine.store.data["orders"]["2"] = previous
+        with self.assertRaisesRegex(HomeAssistantError, "active or uncertain"):
+            await self.submit(batch)
+        self.transport.assert_not_awaited()
+
+    async def test_refresh_failure_status_does_not_enable_resubmission(self):
+        batch = await self.prepare()
+        await self.submit(batch)
+        self.transport.return_value = {"id": "mock-zinc-id", "status": "order_failed"}
+        report = await self.call("refresh_batch_zinc", {"batch_id": batch["id"]}, response=True)
+        self.assertEqual(report["status"], "order_failed")
+        with self.assertRaises(HomeAssistantError):
+            await self.submit(batch)
+        self.assertEqual(self.transport.await_count, 2)
+
+    async def test_single_order_explicit_stock_failure_supports_v2_and_legacy_codes(self):
+        saved = self.engine.store.data["orders"]["1"]
+        saved.update(zinc_order_id="mock-zinc-id", zinc_environment="sandbox")
+        for status, code in (("failed", "out_of_stock"), ("order_failed", "product_out_of_stock")):
+            self.transport.return_value = {"status": status, "error_code": code}
+            await self.call("refresh_zinc", {"order_id": "1"})
+            self.assertEqual(saved["status"], "out_of_stock")
+            self.assertEqual(len(self.engine.store.data["orders"]), 1)
+
+    async def test_item_error_alone_never_enables_a_replacement(self):
+        saved = self.engine.store.data["orders"]["1"]
+        saved.update(zinc_order_id="mock-zinc-id", zinc_environment="sandbox")
+        self.transport.return_value = {"status": "order_failed", "items": [{"error_type": "product_out_of_stock"}]}
+        await self.call("refresh_zinc", {"order_id": "1"})
+        self.assertEqual(saved["status"], "order_failed")
+        with self.assertRaisesRegex(HomeAssistantError, "confirmed out of stock"):
+            await self.call("queue_next_substitution", {"order_id": "1"})
+
     async def test_missing_shipping_address_blocks_submission(self):
         batch = await self.prepare()
         self.hass.config_entries.async_update_entry(self.entry, options={"zinc_api_key": "zn_test_not-a-real-key"})

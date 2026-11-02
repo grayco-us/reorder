@@ -2,6 +2,20 @@
 
 Home Assistant custom integration for routing exact, preapproved shopping-list items to a persistent order queue, with **Zinc API submission (sandbox first)**.
 
+## v0.4.2: Visible submission and refresh results
+
+`reorder.submit_batch_zinc` and `reorder.refresh_batch_zinc` now show the batch ID,
+Zinc status, and sandbox/live mode in a persistent notification. Refresh updates the
+same notification instead of adding one on every call. Both actions support optional
+responses for scripts; existing callers still work without requesting a response.
+Saved batches include `last_refreshed_at` after a successful refresh. Notification
+failures cannot turn a successful save into a failed action.
+
+Zinc v2 `pending` orders block duplicate purchases for the same product. Invalid
+refresh responses leave the previously saved status intact. Failed batches remain
+locked against resubmission; reconcile with Zinc instead of submitting again.
+Configuration, entity IDs, and the existing storage version/key are unchanged.
+
 ## v0.4.1: Reliable batch actions
 
 Batch preview and preparation use Home Assistant's supported persistent notification API.
@@ -44,7 +58,7 @@ No real orders or payment credentials are used in automated tests.
 
 A real order can charge your funded Zinc wallet, including shipping/tax, within the configured total-order ceiling. `max_price` is a **total order cap in USD**, including tax and shipping, not a unit price. Address and API key are stored in Home Assistant's config-entry options. Protect your HA instance, backups, and diagnostics; never commit secrets to Git.
 
-No verified sandbox transaction or Home Assistant runtime integration test has been performed for this release. Test carefully before enabling live mode. Order status is retrieved manually (webhooks and automated polling are planned). No automated shopping-list removal or queue retry is performed.
+The sandbox success path has been manually exercised in a development Home Assistant instance. Automated regression tests use mocked Zinc transport; live purchasing and the full range of sandbox failures remain unverified. Test carefully before enabling live mode. Order status is retrieved manually (webhooks and automated polling are planned). No automated shopping-list removal or queue retry is performed.
 
 ## Install
 
