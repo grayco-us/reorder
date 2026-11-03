@@ -42,7 +42,7 @@ test("browser instances keep independent selection", () => {
   assert.match(second._details(), /Sandbox success test/);
 });
 
-test("local cancellation requires explicit confirmation bound to the batch ID", async () => {
+test("local cancellation requires explicit confirmation bound to the order ID", async () => {
   const view = panel(), calls = [];
   view._hass.callWS = async message => { calls.push(message); return message.type === "reorder/panel" ? makePanelData() : {}; };
   await view._action("cancel_batch", "ready-batch");
@@ -159,7 +159,7 @@ test("failed product saves preserve the draft and surface the validation message
   assert.equal(view._busy, false);
 });
 
-test("invalidated batches explain canceled and returned lines inline", () => {
+test("invalidated orderes explain canceled and returned lines inline", () => {
   const view = panel();
   const batch = view._data.batches[0];
   batch.status = "invalidated";
@@ -170,9 +170,9 @@ test("invalidated batches explain canceled and returned lines inline", () => {
   view._selectedId = batch.id;
   const html = view._details();
   assert.match(html, /Needs fresh review/);
-  assert.match(html, /Returned to queue for fresh review/);
+  assert.match(html, /Returned to Cart for fresh review/);
   assert.match(html, /Canceled locally/);
-  assert.match(html, /This batch cannot be submitted/);
+  assert.match(html, /This order cannot be submitted/);
 });
 
 
@@ -377,5 +377,48 @@ test("tracking and partial failures are visible with escaped safe links and pric
   view._data.mode = "Live disabled";
   assert.match(view._guidance(), /Refresh status remains available/);
   view._filter = "attention";
-  assert.match(view._batchList(), /No batches need attention/);
+  assert.match(view._batchList(), /No orders need attention/);
+ });
+
+ test("Cart and Orders use clear labels while retaining legacy API names", () => {
+  const view = panel();
+  view._tab = "queue";
+  view._render();
+  assert.match(view.shadowRoot.innerHTML, />Cart<span/);
+  assert.match(view.shadowRoot.innerHTML, />Orders<span/);
+  assert.match(view._queue(), /Prepare order for review/);
+  assert.match(view._queue(), /data-edit-cart="queue-1"/);
+  assert.equal(panelActions.has("prepare_batch"), true);
+ });
+
+ test("editing a Cart line sends expected values and blocks preparation until saved", () => {
+  const view = panel();
+  view._cartDraft = {...view._data.queue.orders[0], expected_quantity: 1, expected_max_price: 18, quantity: "3", max_price: "24"};
+  assert.match(view._queue(), /disabled>Prepare order/);
+  const calls = [];
+  view._manage = (...args) => calls.push(args);
+  view._submit({preventDefault() {}, target: {dataset: {form: "cart"}}});
+  assert.equal(calls[0][0], "reorder/cart_edit");
+  assert.deepEqual(calls[0][1].item, {order_id: "queue-1", quantity: 3, max_price: 24, expected_quantity: 1, expected_max_price: 18});
+  assert.doesNotMatch(JSON.stringify(calls), /confirmation|submit_batch/);
+ });
+
+ test("Cart draft becomes visibly stale if another session changes the item", () => {
+  const view = panel();
+  view._cartDraft = {...view._data.queue.orders[0], expected_quantity: 1, expected_max_price: 18};
+  view._data.queue.orders[0].quantity = 2;
+  assert.match(view._cartEditor(), /This item changed or left the Cart/);
+  assert.match(view._cartEditor(), /disabled>Save Cart item/);
+ });
+
+ test("Cart removal requires confirmation and preserves drafts after save errors", async () => {
+  const view = panel();
+  view._cartRemove = {...view._data.queue.orders[0], expected_quantity: 1, expected_max_price: 18};
+  assert.match(view._cartEditor(), /Shopping List entry is not changed/);
+  assert.match(view._cartEditor(), /Remove from Cart/);
+  view._cartDraft = {id: "queue-1", name: "Coffee", expected_quantity: 1, expected_max_price: 18};
+  view._hass.callWS = async () => {throw {message: "Cart item changed"};};
+  await view._manage("reorder/cart_edit", {item: {}}, "Saved");
+  assert.equal(view._cartDraft.id, "queue-1");
+  assert.match(view._error, /Cart item changed/);
  });

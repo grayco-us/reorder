@@ -40,6 +40,15 @@ panel.hass = {
       window.snapshot.product_count = window.snapshot.catalog.filter(product => product.enabled).length;
       return { removed: true };
     }
+    if (message.type === 'reorder/cart_edit') {
+      const item = window.snapshot.queue.orders.find(line => line.id === message.item.order_id);
+      if (!item?.can_edit || item.quantity !== message.item.expected_quantity || item.max_price !== message.item.expected_max_price) throw {message: 'Cart item changed'};
+      if (message.remove) window.snapshot.queue.orders = window.snapshot.queue.orders.filter(line => line.id !== item.id);
+      else Object.assign(item, {quantity: message.item.quantity, max_price: message.item.max_price});
+      window.snapshot.queue.count = window.snapshot.queue.orders.length;
+      window.snapshot.queue.price_ceiling = window.snapshot.queue.orders.reduce((total, line) => total + line.max_price, 0);
+      return message.remove ? {removed: true} : {saved: true};
+    }
     if (message.type === 'reorder/live_submit') {
       const batch = window.snapshot.batches.find(item => item.id === message.batch_id);
       if (window.snapshot.mode !== 'Live enabled' || !batch?.can_submit_live || message.confirmation !== 'PLACE LIVE ORDER' || message.review_token !== batch.review_token) throw {message: 'Live review rejected'};

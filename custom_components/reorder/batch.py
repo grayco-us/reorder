@@ -33,9 +33,9 @@ def preview(data, retailer="zinc", limit=10):
 
 async def create_batch(engine, retailer="zinc", max_items=10):
     if retailer != "zinc":
-        raise ValueError("Only Zinc batches are supported in this version")
+        raise ValueError("Only Zinc orders are supported in this version")
     if not 1 <= max_items <= 10:
-        raise ValueError("Batch size must be from 1 to 10")
+        raise ValueError("Order size must be from 1 to 10")
     async with engine.lock:
         orders = eligible_orders(engine.store.data, retailer)[:max_items]
         if not orders:
@@ -70,7 +70,7 @@ def review_batch(data, batch_id):
     """Return saved product snapshots without consulting the mutable catalog."""
     batch = data.get("batches", {}).get(batch_id)
     if batch is None:
-        raise ValueError("Batch not found")
+        raise ValueError("Order not found")
     if batch["status"] == "invalidated" and "snapshot_orders" in batch:
         orders = batch["snapshot_orders"]
         return deepcopy({**batch, "orders": orders, "count": len(orders)})
@@ -78,7 +78,7 @@ def review_batch(data, batch_id):
     for order_id in batch["order_ids"]:
         order = data["orders"].get(order_id)
         if order is None or order.get("batch_id") != batch_id:
-            raise ValueError("Batch contains a missing or reassigned order")
+            raise ValueError("Order contains a missing or reassigned order")
         orders.append({key: order[key] for key in (
             "id", "name", "product_id", "quantity", "max_price", "status"
         )})
@@ -90,28 +90,28 @@ async def cancel_batch(engine, batch_id):
     async with engine.lock:
         batch = engine.store.data.get("batches", {}).get(batch_id)
         if batch is None:
-            raise ValueError("Batch not found")
+            raise ValueError("Order not found")
         if "zinc_environment" in batch or batch.get("zinc_order_id"):
-            raise ValueError("Submitted or uncertain batches must be reconciled with Zinc")
+            raise ValueError("Submitted or uncertain orders must be reconciled with Zinc")
         if batch["status"] == "canceled" and batch.get("canceled_at"):
             return review_batch(engine.store.data, batch_id)
         if batch["status"] != "ready":
-            raise ValueError("Only an unsubmitted ready batch can be canceled locally")
+            raise ValueError("Only an unsubmitted ready order can be canceled locally")
         orders = [engine.store.data["orders"].get(key) for key in batch["order_ids"]]
         if not orders or any(
             order is None or order.get("batch_id") != batch_id
             or order["status"] not in ACTIVE or "zinc_environment" in order
             or order.get("zinc_order_id") for order in orders
         ):
-            raise ValueError("Batch contains an invalid, changed, or attempted order")
+            raise ValueError("Order contains an invalid, changed, or attempted order")
         previous_batch = deepcopy(batch)
         previous_orders = [deepcopy(order) for order in orders]
         batch.update(
             status="canceled", canceled_at=dt_util.utcnow().isoformat(),
-            note="Batch and its queued orders canceled locally. Nothing was sent to Zinc.",
+            note="Order and its queued orders canceled locally. Nothing was sent to Zinc.",
         )
         for order in orders:
-            order.update(status="canceled", note="Canceled with its unsubmitted batch; no purchase was made.")
+            order.update(status="canceled", note="Canceled with its unsubmitted order; no purchase was made.")
         try:
             await engine.store.save()
         except Exception:

@@ -1,5 +1,10 @@
 # Reorder sidebar app (v0.11.1)
 
+> **v0.12.0 terminology:** The app calls the queue **Cart** and prepared batches
+> **Orders**. Existing action names/IDs remain unchanged. See
+> [Cart and Orders](CART_AND_ORDERS.md) for editing, local removal and frozen review.
+
+
 Reorder now bundles its own responsive frontend and automatically adds **Reorder**
 to Home Assistant's sidebar. There is no dashboard YAML to paste, no resource URL
 to register, and no separate frontend plugin or build step to install.
@@ -13,7 +18,7 @@ API, or frontend dependency is involved.
 
 1. Pull/deploy the current feature branch as usual and restart Home Assistant.
 2. Refresh your browser. A **Reorder** sidebar entry should appear for administrator
-   users. Open it and choose a batch to see its contents.
+   users. Open it and choose an order to see its contents.
 3. Once the app is working, you may hide the old manually created Reorder dashboard
    in **Settings → Dashboards**. Reorder does not delete or overwrite dashboards.
 
@@ -26,16 +31,16 @@ retained. No batch migration or API-key re-entry is required.
 
 ## Current interface
 
-- **Batches:** All / Ready / History filters, saved status, mode and spending ceiling.
-  Selecting a batch opens product names and HTTPS links, quantities, line ceilings,
+- **Orders:** All / Ready / History filters, saved status, mode and spending ceiling.
+  Selecting an order opens product names and HTTPS links, quantities, line ceilings,
   total ceiling, timestamps and the Zinc order ID when present. No notification is
   needed to review contents.
 - **Queue:** The next up to 10 eligible Zinc order lines and their combined ceiling.
-  **Prepare batch for review** creates local work only, then opens the new batch.
+  **Prepare order for review** creates local work only, then opens the new order.
 - **Refresh status:** Retrieves provider status through the existing guarded action.
   It is unavailable without a Zinc order ID or when the key environment differs.
-- **Cancel locally:** Requires an explicit confirmation tied to that batch ID and
-  cancels only never-submitted ready batches and their queued order lines. Submitted
+- **Cancel locally:** Requires an explicit confirmation tied to that order ID and
+  cancels only never-submitted ready orderes and their queued order lines. Submitted
   or uncertain work must be reconciled with Zinc. This is not retailer cancellation.
 - **Shopping List activity** in Queue explains whether recent additions were queued
   or skipped. It shows the latest 20 received additions since restart, without saving
@@ -49,7 +54,7 @@ retained. No batch migration or API-key re-entry is required.
 - **Reload:** Reads the currently saved Reorder state; it does not refresh Zinc orders.
 - **Connection:** Opens the existing Reorder integration configuration.
 
-Ready sandbox batches now have a typed-confirmation submission control. The backend
+Ready sandbox orderes now have a typed-confirmation submission control. The backend
 requires a test key independently of the browser. Live-enabled administrators also have **Review live order**, with a separate real-money
 warning, saved-content acknowledgement and **PLACE LIVE ORDER**. Native actions retain
 their existing safeguards. See [the ordering guide](ORDERING.md)
@@ -118,7 +123,7 @@ CI runs the backend and dependency-free frontend suites; browser tests are optio
    are not monitored. Queue shows whether that source is configured and loaded.
 2. Expand **Configured product names and aliases** and check the exact name/alias,
    enabled state, and retailer. Matching ignores case and extra spaces, but does not
-   use fuzzy/substring matching. Zinc batches include Zinc products only.
+   use fuzzy/substring matching. Zinc orders include Zinc products only.
 3. Add a fresh item, then inspect **Shopping List activity**. Items added before the
    upgrade/restart are not automatically replayed. Removing and re-adding an item
    produces a new addition event without deleting any order history.
@@ -130,7 +135,7 @@ A canceled local batch/order has never been sent to Zinc. In v0.5.1 it no longer
 blocks a *fresh* item through cooldown, but its original Shopping List item remains
 seen and its original order stays canceled. This is not an automatic retry or an
 automatic restoration of canceled work. A queued `other`/`kroger` product is still
-catalog-only: activity explains why it does not appear in the next Zinc batch.
+catalog-only: activity explains why it does not appear in the next Zinc order.
 
 End-to-end tests exercise both `shopping_list.add_item` and the built-in
 `todo.add_item` UI path with exact names/aliases, rather than only calling the matcher.
@@ -139,14 +144,14 @@ End-to-end tests exercise both `shopping_list.add_item` and the built-in
 
 See [Shopping List and configuration flows](FLOWS.md) for the complete behavior table.
 Completion/removal cancels unsubmitted work; edits that change the approved product
-invalidate a prepared batch and return unaffected lines for fresh review. Submitted
+invalidate a prepared order and return unaffected lines for fresh review. Submitted
 purchases are never canceled by a list edit. The app shows **Needs fresh review** and
 the historical canceled/returned lines. Products and Settings are available as new
 app pages after deployment/restart and a browser refresh; no dashboard import is needed.
 
 ## Order stage (v0.8.0)
 
-See [Sandbox ordering and receipt](ORDERING.md) for the full walkthrough. A ready batch
+See [Sandbox ordering and receipt](ORDERING.md) for the full walkthrough. A ready order
 in Sandbox mode can be submitted after a typed confirmation. Tracking, item failures,
 partial fulfillment and reported totals appear after refresh. Explicit selected receipt
 can check off exact linked list IDs. Confirmed delivered lines now complete their
@@ -158,7 +163,7 @@ provides an independent switch to keep receipt manual. Missing/mismatched provid
 The mode notice explains Sandbox, Live disabled and Live enabled. Expand **What these
 terms mean** for queue/batch states, ceilings, delivery, list completion and recovery.
 See [LIVE_TESTING.md](LIVE_TESTING.md) for in-app live review and the native alternative.
-Live review is bound to saved batch contents and connection options. A change or an
+Live review is bound to saved order contents and connection options. A change or an
 integration reload invalidates the confirmation; administrators must review again.
 
 ## Notifications

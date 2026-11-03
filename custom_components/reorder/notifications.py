@@ -32,7 +32,7 @@ def async_notify(
 # Events describe saved state. Delivery never invokes a purchasing action.
 EVENT_LABELS = {
     "cart_added": "Added to cart",
-    "batch_ready": "Batch needs review",
+    "batch_ready": "Order needs review",
     "order_status": "Order status changed",
     "delivery": "Delivery confirmed",
     "list_change": "Cart changed",

@@ -17,7 +17,7 @@ from .fulfillment import mapped_item, receipt_eligible, item_delivery_confirmed
 from .shopping import shopping_items
 from .review import review_token
 from .notifications import settings_for, destinations, async_deliver
-from .product_config import PRODUCT_SCHEMA, PREFERENCES_SCHEMA, NOTIFICATION_SCHEMA
+from .product_config import PRODUCT_SCHEMA, PREFERENCES_SCHEMA, NOTIFICATION_SCHEMA, CART_EDIT_SCHEMA
 
 PANEL_PATH = "reorder-app"
 ASSET_PATH = "/reorder-assets"
@@ -117,9 +117,20 @@ def panel_data(engine, entry):
             "delivered": sum(bool(order.get("delivery_confirmed")) for order in item["orders"]),
             "failed": sum((order.get("provider_item") or {}).get("status") in ("failed", "skipped", "cancelled") for order in item["orders"]),
             "list_complete": sum(order.get("shopping_list_status") == "complete" for order in item["orders"])}
+        if item["progress"]["total"] and batch["status"] == "order_placed":
+            if item["progress"]["delivered"] == item["progress"]["total"]:
+                item["status_label"] = "Delivered"
+            elif item["progress"]["delivered"]:
+                item["status_label"] = "Partially delivered"
         batches.append(item)
+    cart = preview(engine.store.data, limit=None)
+    cart["next_order_count"] = min(10, cart["count"])
+    cart["next_order_ceiling"] = round(sum(line["max_price"] for line in cart["orders"][:10]), 2)
+    for line in cart["orders"]:
+        original = engine.store.data["orders"][line["id"]]
+        line["can_edit"] = (not original.get("batch_id") and "zinc_environment" not in original and not original.get("zinc_order_id"))
     return {
-        "mode": mode, "batches": batches, "queue": preview(engine.store.data),
+        "mode": mode, "batches": batches, "queue": cart,
         "product_count": sum(bool(product["enabled"]) for product in engine.store.data["products"].values()),
         "shopping_list_ready": any(source.state is ConfigEntryState.LOADED for source in
                                    engine.hass.config_entries.async_entries("shopping_list")),
@@ -219,6 +230,25 @@ def _manage_engine(hass, connection, msg):
     if engine is None:
         connection.send_error(msg["id"], "not_found", "Reorder is not loaded")
     return engine
+
+
+@websocket_api.websocket_command({
+    vol.Required("type"): "reorder/cart_edit",
+    vol.Required("entry_id"): str,
+    vol.Required("item"): CART_EDIT_SCHEMA,
+    vol.Optional("remove", default=False): bool,
+})
+@websocket_api.async_response
+async def websocket_cart_edit(hass, connection, msg):
+    engine = _manage_engine(hass, connection, msg)
+    if engine is None:
+        return
+    try:
+        result = await engine.edit_cart(msg["item"], remove=msg["remove"])
+    except (ValueError, vol.Invalid) as err:
+        connection.send_error(msg["id"], "cart_changed", str(err))
+        return
+    connection.send_result(msg["id"], result)
 
 
 @websocket_api.websocket_command({
@@ -332,7 +362,7 @@ async def async_setup_panel(hass, entry):
         ])
         hass.data[_STATIC_KEY] = True
     if not hass.data.get(_WS_KEY):
-        for handler in (websocket_panel, websocket_product_save, websocket_product_remove, websocket_preferences_save, websocket_sandbox_submit, websocket_receive_items, websocket_notification_test, websocket_notifications_save, websocket_live_submit):
+        for handler in (websocket_panel, websocket_product_save, websocket_product_remove, websocket_preferences_save, websocket_sandbox_submit, websocket_receive_items, websocket_notification_test, websocket_notifications_save, websocket_live_submit, websocket_cart_edit):
             websocket_api.async_register_command(hass, handler)
         hass.data[_WS_KEY] = True
     if PANEL_PATH in hass.data.get(frontend.DATA_PANELS, {}):

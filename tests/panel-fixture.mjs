@@ -9,7 +9,7 @@ export function makePanelData() {
       { name: "Laundry detergent", aliases: [], enabled: true, retailer: "zinc", product_id: "https://example.com/detergent", quantity: 1, max_price: 15, cooldown_hours: 168, substitutes: [], can_rename: false },
     ],
     intake_events: [{ name: "coffee", reason: "queued", message: "Queued locally as queue-1. No purchase was made.", created_at: "2026-11-02T13:30:00Z", order_id: "queue-1" }],
-    queue: { count: 1, price_ceiling: 18, orders: [{ id: "queue-1", name: "Morning coffee", quantity: 1, max_price: 18, product_id: "https://example.com/coffee" }] },
+    queue: { count: 1, price_ceiling: 18, orders: [{ id: "queue-1", can_edit: true, name: "Morning coffee", quantity: 1, max_price: 18, product_id: "https://example.com/coffee" }] },
     batches: [
       { id: "ready-batch", status: "ready", status_label: "Ready for review", created_at: "2026-11-02T13:33:06Z", max_price: 50, can_cancel: true, can_refresh: false, can_submit_sandbox: true, review_error: null, receivable_order_ids: [], orders: [
         { id: "line-1", name: "Cat litter", quantity: 2, max_price: 35, product_id: "https://example.com/cat-litter" },

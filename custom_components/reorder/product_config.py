@@ -30,6 +30,15 @@ PRODUCT_SCHEMA = vol.Schema({
     vol.Optional("create_only", default=False): cv.boolean,
 })
 
+CART_EDIT_SCHEMA = vol.Schema({
+    vol.Required("order_id"): cv.string,
+    vol.Required("expected_quantity"): vol.All(vol.Coerce(int), vol.Range(min=1, max=20)),
+    vol.Required("expected_max_price"): finite_price,
+    vol.Optional("quantity"): vol.All(vol.Coerce(int), vol.Range(min=1, max=20)),
+    vol.Optional("max_price"): finite_price,
+})
+
+
 def notification_service(value):
     value = cv.string(value)
     if not value.startswith("notify.") or value in ("notify.send_message", "notify.persistent_notification") or not value[7:].replace("_", "").isalnum():
