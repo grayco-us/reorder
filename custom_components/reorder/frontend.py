@@ -123,7 +123,9 @@ def panel_data(engine, entry):
             elif item["progress"]["delivered"]:
                 item["status_label"] = "Partially delivered"
         batches.append(item)
-    cart = preview(engine.store.data)
+    cart = preview(engine.store.data, limit=None)
+    cart["next_order_count"] = min(10, cart["count"])
+    cart["next_order_ceiling"] = round(sum(line["max_price"] for line in cart["orders"][:10]), 2)
     for line in cart["orders"]:
         original = engine.store.data["orders"][line["id"]]
         line["can_edit"] = (not original.get("batch_id") and "zinc_environment" not in original and not original.get("zinc_order_id"))

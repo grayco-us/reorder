@@ -11,8 +11,10 @@ same persistent multi-line record previously called a batch; no history is recre
 3. Change its quantity (1–20 retailer units) and spending allowance (USD), then save.
    Both apply only to this request. Catalog defaults and the native Shopping List
    entry are not changed. Check the product URL's pack size and variant.
-4. Save or discard the edit before choosing **Prepare order for review**. Up to ten
-   eligible product lines become a saved Order; their allowances form one combined
+4. Save or discard the edit before choosing **Prepare order for review**. The Cart
+   shows all eligible requests and their total allowance, plus the next Order’s limit.
+   Up to ten oldest eligible lines become a saved Order; remaining items stay in the
+   Cart for another Order. Their allowances form one combined
    provider spending cap, not separate enforced line caps or a price quote.
 5. In **Orders**, review the frozen saved contents. Sandbox and live submission keep
    their existing typed confirmations and live opt-in requirements.

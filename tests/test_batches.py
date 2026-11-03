@@ -2342,6 +2342,22 @@ class BatchActionsTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.engine.store.data["orders"]["1"]["quantity"], 2)
         self.transport.assert_not_awaited()
 
+    async def test_cart_shows_all_requests_while_each_order_retains_ten_line_limit(self):
+        from custom_components.reorder.frontend import panel_data
+        self.engine.store.data["orders"] = {str(index): order(index) for index in range(1, 13)}
+        view = panel_data(self.engine, self.entry)["queue"]
+        self.assertEqual(view["count"], 12)
+        self.assertEqual(len(view["orders"]), 12)
+        self.assertEqual(view["price_ceiling"], 150)
+        self.assertEqual((view["next_order_count"], view["next_order_ceiling"]), (10, 125))
+        self.assertEqual((await self.call("preview_batch", response=True))["count"], 10)
+        prepared = await self.prepare()
+        self.assertEqual((len(prepared["order_ids"]), prepared["max_price"]), (10, 125))
+        remaining = panel_data(self.engine, self.entry)["queue"]
+        self.assertEqual(remaining["count"], 2)
+        self.assertTrue(all(line["can_edit"] for line in remaining["orders"]))
+        self.transport.assert_not_awaited()
+
     async def test_missing_shipping_address_blocks_submission(self):
         batch = await self.prepare()
         self.hass.config_entries.async_update_entry(self.entry, options={"zinc_api_key": "zn_test_not-a-real-key"})
