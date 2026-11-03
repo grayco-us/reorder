@@ -1,8 +1,13 @@
 # Sandbox ordering, tracking, and Shopping List receipt (v0.11.0)
 
+> **v0.12.0 terminology:** The app calls the queue **Cart** and prepared batches
+> **Orders**. Existing action names/IDs remain unchanged. See
+> [Cart and Orders](CART_AND_ORDERS.md) for editing, local removal and frozen review.
+
+
 The sidebar now supports the next stage of the workflow: explicitly submit a **sandbox**
 batch, retrieve item/fulfillment/tracking details, and automatically check off linked Shopping List items after confirmed per-item delivery.
-Explicit selected receipt remains available for testing or manual management. Live batches now have a separate **Review live order** flow requiring admin access,
+Explicit selected receipt remains available for testing or manual management. Live orderes now have a separate **Review live order** flow requiring admin access,
 live opt-in, saved-content acknowledgement and **PLACE LIVE ORDER**. Existing native
 submission actions retain their original safeguards; see [LIVE_TESTING.md](LIVE_TESTING.md).
 
@@ -15,10 +20,10 @@ For a user-run first real purchase, use [LIVE_TESTING.md](LIVE_TESTING.md).
 2. Add an enabled Zinc product named **Sandbox success test**, with quantity 1,
    price ceiling $50, and URL:
    `https://zinc.com/shop/products/test-success`.
-3. Add that name to Home Assistant's built-in Shopping List. In Queue, prepare a batch
-   and review its saved products/quantities/total ceiling. Existing prepared batches
+3. Add that name to Home Assistant's built-in Shopping List. In Queue, prepare an order
+   and review its saved products/quantities/total ceiling. Existing prepared orders
    do not change when you edit the catalog.
-4. Open the ready batch and choose **Submit sandbox batch**. Check the displayed
+4. Open the ready order and choose **Submit sandbox order**. Check the displayed
    number of lines and ceiling, type **SANDBOX**, and confirm once. The server requires
    a test key independently of the browser; a live key cannot use this gateway.
 5. Use **Refresh status**. Zinc is asynchronous: pending/processing can precede
@@ -53,7 +58,7 @@ results. The current request uses Zinc's strict default fulfillment: a mixed bat
 can fail as a whole. When Zinc reports partial success, the UI shows it and only
 explicitly successful eligible test lines can be selected for simulated receipt.
 Failed, skipped, canceled, unmatched or quantity-mismatched lines are not cleared or
-retried. There is no automatic replacement, new batch submission or retailer cancellation.
+retried. There is no automatic replacement, new order submission or retailer cancellation.
 
 HTTP failures show status and a sanitized machine-readable code when available, never
 raw provider error bodies. A failed/uncertain attempt remains locked against resubmission.

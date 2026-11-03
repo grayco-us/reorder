@@ -46,7 +46,7 @@ set_product:
           max: 10000
           step: 0.01
       name: Product ceiling contribution (USD)
-      description: Allowance for configured units plus tax and shipping. Batch contributions are summed into one
+      description: Allowance for configured units plus tax and shipping. Order contributions are summed into one
         order cap, not enforced separately per line.
     cooldown_hours:
       selector:
@@ -67,7 +67,7 @@ remove_product:
       selector:
         text: null
 approve_order:
-  name: Approve local queued order
+  name: Mark Cart item approved locally
   description: Marks an unbatched queued line approved locally. Approval never submits a Sandbox or live purchase.
   fields:
     order_id:
@@ -75,9 +75,9 @@ approve_order:
       selector:
         text: null
 cancel_order:
-  name: Cancel local queued order
+  name: Remove queued Cart item locally
   description: Cancels an unbatched queued line locally. Cannot cancel a submitted retailer order. For prepared
-    lines, manage the batch instead.
+    lines, manage the order instead.
   fields:
     order_id:
       required: true
@@ -92,8 +92,8 @@ submit_zinc:
       required: true
       selector:
         text: null
-      description: Local unbatched Reorder order ID, not a saved batch ID or Zinc order ID. Use submit_batch_zinc
-        for prepared batches.
+      description: Local unbatched Reorder order ID, not a saved order ID or Zinc order ID. Use submit_batch_zinc
+        for prepared orders.
     confirmation:
       required: true
       selector:
@@ -119,12 +119,12 @@ queue_next_substitution:
       selector:
         text: null
 preview_batch:
-  name: Preview Zinc batch
+  name: Preview Zinc order
   description: Previews eligible products and spending ceiling without purchases. Supports an optional preview response.
 prepare_batch:
-  name: Prepare Zinc batch
-  description: Saves up to 10 unbatched product lines for review. Returns the saved batch when a response is requested;
-    also available in Prepared batches sensor attributes. Notification failure does not undo creation.
+  name: Prepare Zinc order
+  description: Saves up to 10 unbatched product lines for review. Returns the saved order when a response is requested;
+    also available in Prepared orderes sensor attributes. Notification failure does not undo creation.
   fields:
     max_items:
       selector:
@@ -133,49 +133,49 @@ prepare_batch:
           max: 10
           mode: box
 submit_batch_zinc:
-  name: Submit Zinc batch
-  description: Submits a ready saved batch once using the current credentials and its combined USD ceiling, including
+  name: Submit Zinc order
+  description: Submits a ready saved order once using the current credentials and its combined USD ceiling, including
     tax and shipping. Requires SANDBOX for a test key, or a live key plus enabled live purchasing and PLACE LIVE
     ORDER. Live submission can spend real money. An uncertain attempt must be reconciled in Zinc, not submitted
-    as a new batch.
+    as a new order.
   fields:
     batch_id:
       required: true
       selector:
         text: null
-      name: Saved batch ID
-      description: Local Reorder batch ID shown in Batches, not the Zinc order ID.
+      name: Saved order ID
+      description: Local Reorder order ID shown in Orders, not the Zinc order ID.
     confirmation:
       required: true
       description: SANDBOX for test credentials or PLACE LIVE ORDER for live credentials.
       selector:
         text: null
 refresh_batch_zinc:
-  name: Refresh Zinc batch status
+  name: Refresh Zinc order status
   description: Retrieves status without making a purchase. May check off original Shopping List IDs after confirmed
     item delivery when automatic completion is enabled. Placement alone never completes the list. Tracking also
-    runs every 15 minutes for unresolved batches; supports an optional saved response. Requires a valid matching-environment
+    runs every 15 minutes for unresolved orders; supports an optional saved response. Requires a valid matching-environment
     key, not live purchasing enablement or shipping details.
   fields:
     batch_id:
       required: true
       selector:
         text: null
-      name: Saved batch ID
-      description: Local Reorder batch ID shown in Batches, not the Zinc order ID.
+      name: Saved order ID
+      description: Local Reorder order ID shown in Orders, not the Zinc order ID.
 review_batch:
-  name: Review saved batch
-  description: Shows the batch's saved product URLs, quantities, status, and price ceilings without contacting Zinc.
+  name: Review saved order
+  description: Shows the order's saved product URLs, quantities, status, and price ceilings without contacting Zinc.
     Supports an optional response.
   fields:
     batch_id:
       required: true
       selector:
         text: null
-      name: Saved batch ID
-      description: Local Reorder batch ID shown in Batches, not the Zinc order ID.
+      name: Saved order ID
+      description: Local Reorder order ID shown in Orders, not the Zinc order ID.
 cancel_batch:
-  name: Cancel unsubmitted batch
+  name: Cancel unsubmitted order
   description: Cancels a ready local batch and all its queued orders. Does not cancel retailer purchases or return
     orders to the queue. Attempted submissions cannot be canceled here. Supports an optional response.
   fields:
@@ -183,5 +183,5 @@ cancel_batch:
       required: true
       selector:
         text: null
-      name: Saved batch ID
-      description: Local Reorder batch ID shown in Batches, not the Zinc order ID.
+      name: Saved order ID
+      description: Local Reorder order ID shown in Orders, not the Zinc order ID.

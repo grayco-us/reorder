@@ -1,8 +1,13 @@
 # Tracking and recovery (v0.11.0)
 
-Use **Batches → Needs attention** to find uncertain submissions, saved tracking/list
+> **v0.12.0 terminology:** The app calls the queue **Cart** and prepared batches
+> **Orders**. Existing action names/IDs remain unchanged. See
+> [Cart and Orders](CART_AND_ORDERS.md) for editing, local removal and frozen review.
+
+
+Use **Orders → Needs attention** to find uncertain submissions, saved tracking/list
 errors, failed or partial fulfillment, missing item mappings, changed source entries,
-and unresolved batches whose credentials do not match the current environment.
+and unresolved orders whose credentials do not match the current environment.
 The filter is a derived view of saved state; it does not change orders or mark a
 problem resolved. Check each batch's last successful refresh time and its recovery text.
 

@@ -9,15 +9,15 @@ views:
       - type: grid
         cards:
           - type: heading
-            heading: Batch review
+            heading: Order review
             icon: mdi:clipboard-text-search-outline
           - type: entities
             show_header_toggle: false
             entities:
               - entity: select.reorder_batch
-                name: Choose a batch
+                name: Choose an order
           - type: markdown
-            title: Batch contents
+            title: Order contents
             content: |-
               {% set batch = state_attr('select.reorder_batch', 'batch') %}
               {% set orders = state_attr('select.reorder_batch', 'orders') or [] %}
@@ -27,7 +27,7 @@ views:
               {% elif batch %}
               **{{ batch.status_label }}** · {{ batch.zinc_environment | default('Not submitted') | capitalize }}
 
-              Batch `{{ batch.id }}`
+              Order `{{ batch.id }}`
 
               {% set created = as_timestamp(batch.created_at | default(none), none) %}
               {% if created is not none %}Created: {{ created | timestamp_custom('%b %d, %Y at %I:%M %p') }}{% endif %}
@@ -49,7 +49,7 @@ views:
 
               Price ceilings are spending limits, not quotes.
               {% else %}
-              Choose a batch above to see its products, quantities, spending limits, and saved status here.
+              Choose an order above to see its products, quantities, spending limits, and saved status here.
               {% endif %}
           - type: horizontal-stack
             cards:
@@ -70,7 +70,7 @@ views:
                   target:
                     entity_id: button.reorder_cancel_batch
                   confirmation:
-                    text: Cancel this unsubmitted batch AND its queued orders? They remain in history and will not be queued again automatically. This does not cancel retailer purchases.
+                    text: Cancel this unsubmitted order AND its queued orders? They remain in history and will not be queued again automatically. This does not cancel retailer purchases.
       - type: grid
         cards:
           - type: heading
@@ -97,7 +97,7 @@ views:
                   action: perform-action
                   perform_action: reorder.preview_batch
               - type: button
-                name: Prepare batch
+                name: Prepare order
                 icon: mdi:package-variant-closed-plus
                 tap_action:
                   action: perform-action
@@ -112,7 +112,7 @@ views:
               {% for batch in ready | reverse %}
               - **{{ batch.id }}** — {{ batch.order_ids | count }} product line(s), ceiling **${{ '%.2f' | format(batch.max_price) }}**
               {% else %}
-              No prepared batches waiting for review.
+              No prepared orders waiting for review.
               {% endfor %}
           - type: markdown
             title: Submitted and past batches
@@ -123,7 +123,7 @@ views:
                 {% set refreshed = as_timestamp(batch.last_refreshed_at | default(none), none) %}
                 {% if refreshed is not none %}Updated {{ refreshed | timestamp_custom('%b %d, %Y at %I:%M %p') }}{% endif %}
               {% else %}
-              No submitted or canceled batches yet.
+              No submitted or canceled orders yet.
               {% endfor %}
 
-              Most recent 25 batches shown. Use the selector to review older batches.
+              Most recent 25 orders shown. Use the selector to review older batches.

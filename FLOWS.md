@@ -1,13 +1,18 @@
 # Shopping List and configuration flows (v0.8.0)
 
+> **v0.12.0 terminology:** The app calls the queue **Cart** and prepared batches
+> **Orders**. Existing action names/IDs remain unchanged. See
+> [Cart and Orders](CART_AND_ORDERS.md) for editing, local removal and frozen review.
+
+
 Reorder watches Home Assistant's built-in Shopping List. Adds and updates only create
 or change **local** work; they never submit a purchase. Synchronization is on by default
 and can be disabled under **Reorder → Settings** for manual queue management.
 
-| Shopping List change | Unsubmitted order | Prepared batch | Submitted or uncertain work |
+| Shopping List change | Unsubmitted order | Prepared order | Submitted or uncertain work |
 | --- | --- | --- | --- |
 | Add an enabled exact name/alias | Queue once, subject to duplicate/cooldown rules | Existing work is not duplicated | Existing safeguards still block duplicates |
-| Rename to another alias of the same product | Keep quantities, URL and price ceiling | Keep the prepared batch | Leave unchanged |
+| Rename to another alias of the same product | Keep quantities, URL and price ceiling | Keep the prepared order | Leave unchanged |
 | Rename to another approved product | Cancel old line; queue a new product snapshot | Invalidate the old batch; return other lines to queue | Leave unchanged; add a separate item for a new request |
 | Rename to an unmatched/disabled/ambiguous name | Cancel old line; explain why no replacement was queued | Invalidate and return other lines to queue | Leave unchanged |
 | Check off / complete | Cancel the local line | Invalidate and return other lines to queue | Leave unchanged; this does not cancel a retailer order |
@@ -16,9 +21,9 @@ and can be disabled under **Reorder → Settings** for manual queue management.
 | Complete/uncheck all, clear completed | Reconcile affected linked lines against a known current list | Apply the same invalidation rule | Leave unchanged |
 | Reorder the list | No change | No change | No change |
 
-An invalidated batch has status `invalidated` (**Needs fresh review**). It cannot be
+An invalidated order has status `invalidated` (**Needs fresh review**). It cannot be
 submitted. Its product snapshots remain available in history even after unaffected
-orders are assigned to a new batch. A removed/completed line stays canceled. Unaffected
+orders are assigned to a new order. A removed/completed line stays canceled. Unaffected
 lines retain their saved quantities and spending limits when returned to the queue.
 Prepare another batch to review the resulting set; the old batch is never silently
 edited into a different purchasable order.
@@ -32,7 +37,7 @@ active/uncertain submissions retain the existing duplicate protections.
 
 Source item dictionaries are copied when events are received, and source events are
 processed serially. Store mutations are also locked. Rapid edits cannot interleave
-half-applied queue/batch changes. Failed writes restore the touched local order and
+half-applied queue/order changes. Failed writes restore the touched local order and
 batch records and expose an intake error.
 
 Submission separately checks linked Shopping List items immediately before marking
@@ -82,7 +87,7 @@ validation errors keep the draft for correction.
 
 ## Preferences in the sidebar
 
-**Reorder → Settings** manages manual/weekly/rolling batch preparation, weekday, hour
+**Reorder → Settings** manages manual/weekly/rolling order preparation, weekday, hour
 in Home Assistant's local timezone, rolling window, source-change synchronization,
 and the independent automatic delivery-completion preference.
 Schedules prepare batches only; they never submit purchases. Saving unchanged schedule

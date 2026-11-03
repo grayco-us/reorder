@@ -12,7 +12,7 @@ from .fulfillment import fulfillment_snapshot, mapped_item, receipt_eligible, sa
 from .batch import review_batch
 from .shopping import shopping_items, shopping_entity_for_item
 from .notifications import emit
-from .product_config import PREFERENCES_SCHEMA, NOTIFICATION_SCHEMA, product_values
+from .product_config import PREFERENCES_SCHEMA, NOTIFICATION_SCHEMA, CART_EDIT_SCHEMA, product_values
 from .const import ACTIVE_PURCHASE_STATUSES, EVENT_UPDATED
 
 _LOGGER = logging.getLogger(__name__)
@@ -204,7 +204,7 @@ class ReorderEngine:
                 raise ValueError("A Shopping List item was renamed; review the queue before submitting")
 
     async def _cancel_list_item(self, item, change, *, reconciliation=False):
-        """Cancel local lines and invalidate ready batches atomically under one lock."""
+        """Cancel local lines and invalidate ready orderes atomically under one lock."""
         item_id = str(item.get("id") or "")
         async with self.lock:
             linked = [order for order in self.store.data["orders"].values()
@@ -246,12 +246,12 @@ class ReorderEngine:
                 for snapshot in snapshots:
                     snapshot["status"] = "canceled" if snapshot["id"] in active_ids else "returned_to_queue"
                 batch.update(status="invalidated", invalidated_at=now, snapshot_orders=snapshots,
-                    note="Shopping List changed. Batch invalidated; unaffected lines returned to the queue for fresh review.")
+                    note="Shopping List changed. Order invalidated; unaffected lines returned to the queue for fresh review.")
                 for order_id in batch["order_ids"]:
                     if order_id not in active_ids:
                         survivor = touched[order_id]
                         survivor.pop("batch_id", None)
-                        survivor["note"] = "Returned to queue after a Shopping List change; prepare a new batch for review."
+                        survivor["note"] = "Returned to queue after a Shopping List change; prepare a new order for review."
             for order in active:
                 order.update(status="canceled", canceled_at=now, shopping_list_change=change,
                     note=f"Canceled locally after Shopping List {change}; no purchase was made.")
@@ -268,7 +268,7 @@ class ReorderEngine:
                 raise
             message = "Unsubmitted order canceled locally after the Shopping List change."
             if batches:
-                message += " Its prepared batch was invalidated; other lines returned to the queue for fresh review."
+                message += " Its prepared order was invalidated; other lines returned to the queue for fresh review."
             self._record_intake(item, "list_change", message, reconciliation=reconciliation)
             emit(self, "list_change", message + " No retailer purchase was canceled.")
             return True
@@ -419,13 +419,13 @@ class ReorderEngine:
                 raise
         message = f"Queued locally as {order_id}. No purchase was made."
         if product["retailer"] != "zinc":
-            message += f" This product uses {product['retailer']} and is not eligible for Zinc batches."
+            message += f" This product uses {product['retailer']} and is not eligible for Zinc orders."
         result = self._record_intake(item, "queued", message, order_id, reconciliation=reconciliation)
         strategy = self.store.data.get("batch_settings", {}).get("strategy", "manual")
-        next_step = ("Review your cart and prepare a batch when ready."
-                     if strategy == "manual" else "Your schedule will prepare a batch for review; it never places orders.")
+        next_step = ("Review your cart and prepare an order when ready."
+                     if strategy == "manual" else "Your schedule will prepare an order for review; it never places orders.")
         if product["retailer"] != "zinc":
-            next_step = "This catalog provider is not eligible for Zinc batches."
+            next_step = "This catalog provider is not eligible for Zinc orders."
         emit(self, "cart_added", f"Added {product['name']} × {product['quantity']} to your cart. "
              f"Saved allowance ${product['max_price']:.2f}. {next_step} No purchase has been made.", order_id=order_id)
         return result
@@ -463,13 +463,46 @@ class ReorderEngine:
         self.publish()
         return next_id
 
+    async def edit_cart(self, values, *, remove=False):
+        """Edit only unprepared local lines, with optimistic concurrency checks."""
+        values = CART_EDIT_SCHEMA(values)
+        if not remove and not {"quantity", "max_price"}.issubset(values):
+            raise ValueError("Enter both quantity and spending allowance")
+        async with self.lock:
+            order = self.store.data["orders"].get(values["order_id"])
+            if (order is None or order["status"] not in ("queued", "approved")
+                    or order.get("batch_id") or "zinc_environment" in order or order.get("zinc_order_id")):
+                raise ValueError("This item is no longer editable in the Cart. Reload and review its saved order.")
+            if order["quantity"] != values["expected_quantity"] or order["max_price"] != values["expected_max_price"]:
+                raise ValueError("This Cart item changed in another session. Reload and review it before saving.")
+            previous = deepcopy(order)
+            if remove:
+                order.pop("shopping_list_change", None)
+                order.update(status="canceled", canceled_at=dt_util.utcnow().isoformat(),
+                    note="Removed from the Cart locally. The Shopping List entry remains; no retailer purchase was canceled.")
+            else:
+                if order["quantity"] == values["quantity"] and order["max_price"] == values["max_price"]:
+                    return {"saved": True}
+                order.update(quantity=values["quantity"], max_price=values["max_price"],
+                    note="Cart quantity/allowance edited locally; prepare an order for review. No purchase was made.")
+            try:
+                await self.store.save()
+            except Exception:
+                order.clear()
+                order.update(previous)
+                raise
+        self.publish()
+        emit(self, "list_change", f"{'Removed' if remove else 'Updated'} {order['name']} in the Cart. "
+             "This was a local change; catalog defaults and the Shopping List entry were left unchanged. No retailer order was submitted or canceled.", order_id=order["id"])
+        return {"removed": True} if remove else {"saved": True}
+
     async def change_status(self, order_id, status):
         async with self.lock:
             order = self.store.data["orders"].get(order_id)
             if order is None:
                 raise ValueError("Order ID not found")
             if order.get("batch_id"):
-                raise ValueError("Order belongs to a batch; manage its batch instead")
+                raise ValueError("Order belongs to an order; manage its batch instead")
             if order["status"] != "queued":
                 raise ValueError("Only queued orders can be modified")
             order["status"] = status
@@ -541,18 +574,18 @@ class ReorderEngine:
         async with self.lock:
             batch = self.store.data.get("batches", {}).get(batch_id)
             if not batch or batch["status"] != "ready" or "zinc_environment" in batch:
-                raise ValueError("Batch must be ready for submission")
+                raise ValueError("Order must be ready for submission")
             orders = [self.store.data["orders"].get(i) for i in batch["order_ids"]]
             if any(o is None or o.get("status") not in ("queued", "approved") or
                    o.get("batch_id") != batch_id or "zinc_environment" in o for o in orders):
-                raise ValueError("Batch contains an invalid or changed order")
+                raise ValueError("Order contains an invalid or changed order")
             if not 1 <= len(orders) <= 10 or len({o["product_key"] for o in orders}) != len(orders):
-                raise ValueError("Batch must contain 1–10 distinct catalog products")
+                raise ValueError("Order must contain 1–10 distinct catalog products")
             product_keys = {o["product_key"] for o in orders}
             if any(o["product_key"] in product_keys and o["id"] not in batch["order_ids"]
                    and any(self._purchase_blocker(o, member) for member in orders if member["product_key"] == o["product_key"])
                    for o in self.store.data["orders"].values()):
-                raise ValueError("Another order for a batch product is active or uncertain")
+                raise ValueError("Another order for an order product is active or uncertain")
             self._check_shopping_items_before_submission(orders)
             batch["status"] = "submitting"
             batch["submitted_at"] = dt_util.utcnow().isoformat()
@@ -581,7 +614,7 @@ class ReorderEngine:
                     order["status"] = "submission_unknown"
                 await self.store.save()
             self.publish()
-            emit(self, "attention", f"Batch {batch_id} needs reconciliation. An order may already exist. Check Zinc before any new purchase; do not submit again or clear saved history.", batch_id=batch_id)
+            emit(self, "attention", f"Order {batch_id} needs reconciliation. An order may already exist. Check Zinc before any new purchase; do not submit again or clear saved history.", batch_id=batch_id)
             raise
         async with self.lock:
             batch["fulfillment"] = details
@@ -651,13 +684,13 @@ class ReorderEngine:
         async with self.lock:
             batch = self.store.data.get("batches", {}).get(batch_id)
             if not batch or not batch.get("zinc_order_id"):
-                raise ValueError("Batch has no Zinc order ID")
+                raise ValueError("Order has no Zinc order ID")
             zinc_id = batch["zinc_order_id"]
         result = await client.get_order(zinc_id)
         if not isinstance(result, dict) or not isinstance(result.get("status"), str) or not result["status"]:
-            raise ValueError("Zinc refresh response missing status; saved batch unchanged")
+            raise ValueError("Zinc refresh response missing status; saved order unchanged")
         if result.get("id") is not None and result["id"] != zinc_id:
-            raise ValueError("Zinc refresh returned a different order ID; saved batch unchanged")
+            raise ValueError("Zinc refresh returned a different order ID; saved order unchanged")
         status = result["status"]
         async with self.lock:
             old_status = batch["status"]
@@ -727,7 +760,7 @@ class ReorderEngine:
                 batch = self.store.data.get("batches", {}).get(batch_id)
                 expected = "sandbox" if simulation else "live"
                 if not batch or batch.get("zinc_environment") != expected:
-                    raise ValueError("Batch environment does not match receipt mode")
+                    raise ValueError("Order environment does not match receipt mode")
                 orders = [self.store.data["orders"][key] for key in batch["order_ids"]]
                 selected = [self.store.data["orders"].get(key) for key in order_ids]
                 if any(order is None or order["id"] not in batch["order_ids"]

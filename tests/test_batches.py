@@ -1,4 +1,4 @@
-"""Batch regression tests using real Home Assistant services and mocked Zinc I/O."""
+"""Order regression tests using real Home Assistant services and mocked Zinc I/O."""
 import asyncio
 from copy import deepcopy
 import os
@@ -306,7 +306,7 @@ class BatchActionsTest(unittest.IsolatedAsyncioTestCase):
         notification = self.hass.data["persistent_notification"][f"reorder_batch_{batch['id']}"]
         self.assertIn("Sandbox simulation", notification["message"])
         self.assertIn("pending", notification["message"])
-        self.assertEqual(notification["title"], "Reorder — Batch Submitted")
+        self.assertEqual(notification["title"], "Reorder — Order Submitted")
         self.transport.assert_awaited_once()
 
     async def test_refresh_returns_saved_status_and_updates_notification(self):
@@ -325,7 +325,7 @@ class BatchActionsTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(restored.data["batches"][batch["id"]], report)
         notification = self.hass.data["persistent_notification"][f"reorder_batch_{batch['id']}"]
         self.assertIn("order_placed", notification["message"])
-        self.assertEqual(notification["title"], "Reorder — Batch Refreshed")
+        self.assertEqual(notification["title"], "Reorder — Order Refreshed")
 
     async def test_status_notifications_cannot_fail_saved_actions(self):
         batch = await self.prepare()
@@ -364,7 +364,7 @@ class BatchActionsTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_ready_batch_refresh_requires_zinc_id(self):
         batch = await self.prepare()
-        # A never-submitted batch has no matching Zinc environment.
+        # A never-submitted order has no matching Zinc environment.
         with self.assertRaisesRegex(HomeAssistantError, "current environment"):
             await self.call("refresh_batch_zinc", {"batch_id": batch["id"]})
         self.transport.assert_not_awaited()
@@ -419,7 +419,7 @@ class BatchActionsTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.engine.store.data, before)
         notification = self.hass.data["persistent_notification"][f"reorder_batch_{batch['id']}"]
         self.assertIn("quantity 2", notification["message"])
-        self.assertEqual(notification["title"], "Reorder — Batch Review")
+        self.assertEqual(notification["title"], "Reorder — Order Review")
         self.transport.assert_not_awaited()
 
     async def test_review_submitted_batch_does_not_contact_zinc(self):
@@ -432,7 +432,7 @@ class BatchActionsTest(unittest.IsolatedAsyncioTestCase):
     async def test_unknown_batch_actions_report_error_without_changes(self):
         before = deepcopy(self.engine.store.data)
         for action in ("review_batch", "cancel_batch"):
-            with self.assertRaisesRegex(HomeAssistantError, "Batch not found"):
+            with self.assertRaisesRegex(HomeAssistantError, "Order not found"):
                 await self.call(action, {"batch_id": "missing"})
         self.assertEqual(self.engine.store.data, before)
         self.transport.assert_not_awaited()
@@ -571,7 +571,7 @@ class BatchActionsTest(unittest.IsolatedAsyncioTestCase):
         self.assertNotEqual(self.hass.states.get("button.reorder_cancel_batch").state, "unavailable")
         self.assertEqual(self.hass.states.get("button.reorder_refresh_batch").state, "unavailable")
         await self.press_batch_button("review")
-        self.assertEqual(self.hass.data["persistent_notification"][f"reorder_batch_{batch['id']}"]["title"], "Reorder — Batch Review")
+        self.assertEqual(self.hass.data["persistent_notification"][f"reorder_batch_{batch['id']}"]["title"], "Reorder — Order Review")
         await self.press_batch_button("cancel")
         self.assertEqual(self.engine.store.data["batches"][batch["id"]]["status"], "canceled")
         self.assertEqual(self.hass.states.get("button.reorder_cancel_batch").state, "unavailable")
@@ -637,7 +637,7 @@ class BatchActionsTest(unittest.IsolatedAsyncioTestCase):
                  for card in section["cards"] if card["type"] == "markdown"]
         await self.hass.async_block_till_done()
         empty = "\n".join(str(Template(card["content"], self.hass).async_render()) for card in cards)
-        self.assertIn("No prepared batches", empty)
+        self.assertIn("No prepared orders", empty)
         self.assertEqual(self.hass.states.get("sensor.reorder_purchasing_mode").state, "Sandbox")
         batch = await self.prepare()
         await self.hass.async_block_till_done()
@@ -655,7 +655,7 @@ class BatchActionsTest(unittest.IsolatedAsyncioTestCase):
         from homeassistant.helpers.template import Template
         dashboard = yaml.safe_load((Path(__file__).resolve().parents[1] / "dashboards/reorder.yaml").read_text())
         card = next(card for section in dashboard["views"][0]["sections"] for card in section["cards"]
-                    if card.get("title") == "Batch contents")
+                    if card.get("title") == "Order contents")
         return str(Template(card["content"], self.hass).async_render())
 
     async def test_selected_contents_appear_inline_without_notification_or_network(self):
@@ -692,7 +692,7 @@ class BatchActionsTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_inline_review_handles_no_selection_and_missing_order(self):
         await self.hass.async_block_till_done()
-        self.assertIn("Choose a batch above", await self.render_batch_contents())
+        self.assertIn("Choose an order above", await self.render_batch_contents())
         batch = await self.prepare()
         self.engine.store.data["orders"].pop("1")
         await self.select_batch(batch)
@@ -733,7 +733,7 @@ class BatchActionsTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(panel.sidebar_title, "Reorder")
         self.assertTrue(panel.require_admin)
         self.assertEqual(panel.config["entry_id"], self.entry.entry_id)
-        self.assertEqual(panel.config["_panel_custom"]["module_url"], "/reorder-assets/reorder-panel.js?v=0.11.1")
+        self.assertEqual(panel.config["_panel_custom"]["module_url"], "/reorder-assets/reorder-panel.js?v=0.12.0")
         self.assertEqual(panel.config["_panel_custom"]["name"], "reorder-panel")
 
     async def test_sidebar_snapshot_excludes_credentials_and_preserves_data(self):
@@ -926,7 +926,7 @@ class BatchActionsTest(unittest.IsolatedAsyncioTestCase):
         await self.configure_coffee(retailer="other")
         await self.add_shopping_item("coffee")
         self.assertEqual(len(self.coffee_orders()), 1)
-        self.assertIn("not eligible for Zinc batches", self.engine.intake_events[0]["message"])
+        self.assertIn("not eligible for Zinc orders", self.engine.intake_events[0]["message"])
         self.transport.assert_not_awaited()
 
     async def test_failed_queue_save_rolls_back_seen_item_and_order(self):
@@ -1208,9 +1208,9 @@ class BatchActionsTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_management_commands_reject_non_admin_users(self):
         from types import SimpleNamespace
-        from custom_components.reorder.frontend import websocket_product_save, websocket_product_remove, websocket_preferences_save, websocket_sandbox_submit, websocket_receive_items, websocket_notification_test, websocket_notifications_save, websocket_live_submit
+        from custom_components.reorder.frontend import websocket_product_save, websocket_product_remove, websocket_preferences_save, websocket_sandbox_submit, websocket_receive_items, websocket_notification_test, websocket_notifications_save, websocket_live_submit, websocket_cart_edit
         before = deepcopy(self.engine.store.data)
-        for handler in (websocket_product_save, websocket_product_remove, websocket_preferences_save, websocket_sandbox_submit, websocket_receive_items, websocket_notification_test, websocket_notifications_save, websocket_live_submit):
+        for handler in (websocket_product_save, websocket_product_remove, websocket_preferences_save, websocket_sandbox_submit, websocket_receive_items, websocket_notification_test, websocket_notifications_save, websocket_live_submit, websocket_cart_edit):
             connection = MagicMock(user=SimpleNamespace(is_admin=False))
             await handler.__wrapped__(self.hass, connection, {"id": 1, "entry_id": self.entry.entry_id})
             connection.send_error.assert_called_once_with(1, "unauthorized", "Administrator access is required")
@@ -1769,7 +1769,7 @@ class BatchActionsTest(unittest.IsolatedAsyncioTestCase):
     async def test_kiosk_payload_uses_documented_action_and_configured_options(self):
         from custom_components.reorder.notifications import async_deliver
         await self.configure_notification_destinations()
-        result = await async_deliver(self.engine, "batch_ready", "Review the saved batch.", batch_id="example")
+        result = await async_deliver(self.engine, "batch_ready", "Review the saved order.", batch_id="example")
         self.assertEqual(result, {"sent": 3, "failed": 0})
         _, service, data = self.notification_calls[-1]
         self.assertEqual(service, "kitchen_tablet_notification")
@@ -2227,6 +2227,120 @@ class BatchActionsTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.engine.intake_events, activity)
         self.assertTrue(self.hass.data["shopping_list"].items[-1]["complete"])
         self.assertEqual(sum(call.args[0] == "POST" for call in self.transport.await_args_list), 1)
+
+    async def test_cart_edit_updates_local_snapshot_without_changing_catalog_or_source(self):
+        from custom_components.reorder.frontend import websocket_cart_edit, panel_data
+        await self.configure_coffee()
+        await self.add_shopping_item("Coffee")
+        line = self.coffee_orders()[0]
+        catalog = deepcopy(self.engine.store.data["products"])
+        source = deepcopy(self.hass.data["shopping_list"].items)
+        result = await self.admin_command(websocket_cart_edit, item={"order_id": line["id"],
+            "quantity": 3, "max_price": 30, "expected_quantity": 2, "expected_max_price": 25})
+        result.send_error.assert_not_called()
+        self.assertEqual((line["quantity"], line["max_price"]), (3, 30))
+        await self.engine.reconcile_shopping_list()
+        self.assertEqual((line["quantity"], line["max_price"]), (3, 30))
+        self.assertEqual(self.engine.store.data["products"], catalog)
+        self.assertEqual(self.hass.data["shopping_list"].items, source)
+        self.assertTrue(next(item for item in panel_data(self.engine, self.entry)["queue"]["orders"] if item["id"] == line["id"])["can_edit"])
+        self.transport.assert_not_awaited()
+
+    async def test_preparing_freezes_edited_cart_values_and_blocks_later_cart_edits(self):
+        line = self.engine.store.data["orders"]["1"]
+        await self.engine.edit_cart({"order_id": "1", "quantity": 4, "max_price": 22,
+            "expected_quantity": 2, "expected_max_price": 12.5})
+        batch = await self.prepare()
+        from custom_components.reorder.batch import review_batch
+        saved = review_batch(self.engine.store.data, batch["id"])
+        self.assertEqual((saved["orders"][0]["quantity"], saved["max_price"]), (4, 22))
+        before = deepcopy(self.engine.store.data)
+        for remove in (True, False):
+            with self.assertRaisesRegex(ValueError, "no longer editable"):
+                await self.engine.edit_cart({"order_id": "1", "quantity": 1, "max_price": 15,
+                    "expected_quantity": 4, "expected_max_price": 22}, remove=remove)
+        self.assertEqual(before, self.engine.store.data)
+        self.transport.assert_not_awaited()
+
+    async def test_cart_edit_and_removal_reject_stale_values_and_attempted_work(self):
+        line = self.engine.store.data["orders"]["1"]
+        values = {"order_id": "1", "quantity": 1, "max_price": 20, "expected_quantity": 1, "expected_max_price": 12.5}
+        with self.assertRaisesRegex(ValueError, "another session"):
+            await self.engine.edit_cart(values)
+        for marker in (dict(zinc_environment="sandbox"), dict(zinc_order_id="existing-provider-id")):
+            before = deepcopy(line)
+            line.update(marker)
+            with self.assertRaisesRegex(ValueError, "no longer editable"):
+                await self.engine.edit_cart(values | {"expected_quantity": 2}, remove=True)
+            line.clear(); line.update(before)
+        self.transport.assert_not_awaited()
+
+    async def test_cart_removal_retains_list_and_history_without_automatic_requeue(self):
+        await self.configure_coffee()
+        await self.add_shopping_item("Coffee")
+        line = self.coffee_orders()[0]
+        source = deepcopy(self.hass.data["shopping_list"].items)
+        await self.engine.edit_cart({"order_id": line["id"], "expected_quantity": 2, "expected_max_price": 25}, remove=True)
+        await self.engine.reconcile_shopping_list()
+        self.assertEqual(line["status"], "canceled")
+        self.assertEqual(len(self.coffee_orders()), 1)
+        self.assertEqual(self.hass.data["shopping_list"].items, source)
+        self.assertIn(line["shopping_item_id"], self.engine.store.data["seen_items"])
+        await self.add_shopping_item("Coffee")
+        self.assertEqual(len(self.coffee_orders()), 2)
+        self.assertEqual(sum(order["status"] == "queued" for order in self.coffee_orders()), 1)
+        self.transport.assert_not_awaited()
+
+    async def test_cart_mutation_save_failure_restores_original_record(self):
+        line = self.engine.store.data["orders"]["1"]
+        before = deepcopy(self.engine.store.data)
+        for remove in (False, True):
+            with patch.object(self.engine.store, "save", side_effect=OSError("disk full")):
+                with self.assertRaises(OSError):
+                    await self.engine.edit_cart({"order_id": "1", "quantity": 3, "max_price": 20,
+                        "expected_quantity": 2, "expected_max_price": 12.5}, remove=remove)
+            self.assertEqual(before, self.engine.store.data)
+            self.assertIs(self.engine.store.data["orders"]["1"], line)
+        self.transport.assert_not_awaited()
+
+    async def test_cart_validation_rejects_invalid_quantities_and_prices_before_mutation(self):
+        import voluptuous as vol
+        before = deepcopy(self.engine.store.data)
+        values = {"order_id": "1", "quantity": 1, "max_price": 20, "expected_quantity": 2, "expected_max_price": 12.5}
+        for changes in ({"quantity": 0}, {"quantity": 21}, {"max_price": -1}, {"max_price": float("nan")}, {"product_id": "https://other.example/changed"}):
+            with self.assertRaises(vol.Invalid):
+                await self.engine.edit_cart(values | changes)
+        self.assertEqual(self.engine.store.data, before)
+        self.transport.assert_not_awaited()
+
+    async def test_competing_cart_edits_accept_one_revision_only(self):
+        values = {"order_id": "1", "quantity": 3, "max_price": 20, "expected_quantity": 2, "expected_max_price": 12.5}
+        results = await asyncio.gather(self.engine.edit_cart(values), self.engine.edit_cart(values | {"quantity": 4}), return_exceptions=True)
+        self.assertEqual(sum(isinstance(result, ValueError) for result in results), 1)
+        self.assertEqual(self.engine.store.data["orders"]["1"]["quantity"], 3)
+        self.transport.assert_not_awaited()
+
+    async def test_order_display_delivery_labels_preserve_raw_provider_status(self):
+        from custom_components.reorder.frontend import panel_data
+        batch, saved = await self.delivered_coffee()
+        await self.call("refresh_batch_zinc", {"batch_id": batch["id"]})
+        snapshot = panel_data(self.engine, self.entry)["batches"][0]
+        self.assertEqual(snapshot["status_label"], "Delivered")
+        self.assertEqual(snapshot["status"], "order_placed")
+        self.assertEqual(self.engine.store.data["batches"][batch["id"]]["status"], "order_placed")
+
+    async def test_cart_edit_and_order_preparation_share_one_atomic_snapshot(self):
+        baseline = deepcopy(self.engine.store.data)
+        values = {"order_id": "1", "quantity": 3, "max_price": 20, "expected_quantity": 2, "expected_max_price": 12.5}
+        edited, prepared = await asyncio.gather(self.engine.edit_cart(values), create_batch(self.engine))
+        self.assertEqual(prepared["max_price"], 20)
+        self.assertEqual(self.engine.store.data["orders"]["1"]["quantity"], 3)
+        self.engine.store.data = deepcopy(baseline)
+        prepared, rejected = await asyncio.gather(create_batch(self.engine), self.engine.edit_cart(values), return_exceptions=True)
+        self.assertIsInstance(rejected, ValueError)
+        self.assertEqual(prepared["max_price"], 12.5)
+        self.assertEqual(self.engine.store.data["orders"]["1"]["quantity"], 2)
+        self.transport.assert_not_awaited()
 
     async def test_missing_shipping_address_blocks_submission(self):
         batch = await self.prepare()

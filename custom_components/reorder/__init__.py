@@ -118,8 +118,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         async_notify(
             hass,
             f"Your cart has {report['count']} eligible product line(s), with a combined spending limit of ${report['price_ceiling']:.2f}. "
-            "Open Reorder → Queue to review and prepare a batch. Nothing has been purchased; this is not a price quote.",
-            title="Reorder — Batch Preview", notification_id="reorder_batch_preview")
+            "Open Reorder → Queue to review and prepare an order. Nothing has been purchased; this is not a price quote.",
+            title="Reorder — Order Preview", notification_id="reorder_batch_preview")
         return report
 
     async def prepare_batch(call: ServiceCall) -> ServiceResponse:
@@ -129,9 +129,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             raise HomeAssistantError(str(err)) from err
         async_notify(
             hass,
-            f"Batch {batch['id']} contains {len(batch['order_ids'])} product lines. "
+            f"Order {batch['id']} contains {len(batch['order_ids'])} product lines. "
             f"Combined spending limit ${batch['max_price']:.2f}. Open Reorder to review saved products and quantities before explicitly submitting. No order placed.",
-            title="Reorder — Batch Ready", notification_id=f"reorder_batch_{batch['id']}")
+            title="Reorder — Order Ready", notification_id=f"reorder_batch_{batch['id']}")
         return dict(batch)
 
     async def batch_review(call: ServiceCall) -> ServiceResponse:
@@ -147,11 +147,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         ]
         async_notify(
             hass,
-            f"Batch {report['id']}: {report['status']}.\n\n"
+            f"Order {report['id']}: {report['status']}.\n\n"
             + "\n".join(lines)
             + f"\n\nTotal price ceiling: ${report['max_price']:.2f}. This is not a quote. "
             "Review only; this action does not submit or cancel an order.",
-            title="Reorder — Batch Review", notification_id=f"reorder_batch_{report['id']}",
+            title="Reorder — Order Review", notification_id=f"reorder_batch_{report['id']}",
         )
         return report
 
@@ -162,9 +162,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             raise HomeAssistantError(str(err)) from err
         async_notify(
             hass,
-            f"Batch {report['id']} and its {report['count']} queued product lines were canceled locally. "
+            f"Order {report['id']} and its {report['count']} queued product lines were canceled locally. "
             "No purchase was made. These orders will not be included in another batch.",
-            title="Reorder — Batch Canceled", notification_id=f"reorder_batch_{report['id']}",
+            title="Reorder — Order Canceled", notification_id=f"reorder_batch_{report['id']}",
         )
         return report
 
@@ -172,10 +172,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         mode = "Sandbox simulation" if report["zinc_environment"] == "sandbox" else "Live order"
         async_notify(
             hass,
-            f"Batch {report['id']}: {batch_status_label(report['status'])} ({report['status']}). {mode}. "
+            f"Order {report['id']}: {batch_status_label(report['status'])} ({report['status']}). {mode}. "
             f"Zinc order ID: {report['zinc_order_id']}. "
             "Open Reorder for saved product outcomes and tracking. Order placed does not mean delivered; no list item is completed merely by placement.",
-            title=f"Reorder — Batch {operation}",
+            title=f"Reorder — Order {operation}",
             notification_id=f"reorder_batch_{report['id']}",
         )
 
@@ -197,7 +197,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         client, sandbox = zinc_read_settings()
         batch = store.data.get("batches", {}).get(call.data["batch_id"])
         if not batch or batch.get("zinc_environment") != ("sandbox" if sandbox else "live"):
-            raise HomeAssistantError("Batch not found in current environment")
+            raise HomeAssistantError("Order not found in current environment")
         try:
             report = await engine.refresh_batch_zinc(call.data["batch_id"], client)
         except ValueError as err:
@@ -219,7 +219,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 "sandbox" if key.startswith("zn_test_") else "live")
         settings = store.data.get("batch_settings", {})
         if scheduled_due(store.data, dt_util.utcnow(), hass.config.time_zone):
-            # Only prepare a batch, NEVER submit or spend funds on a schedule.
+            # Only prepare an order, NEVER submit or spend funds on a schedule.
             # One batch per local date, persisted against restarts.
             local_date = dt_util.as_local(dt_util.utcnow()).date().isoformat()
             if settings.get("last_scheduled_date") == local_date:
@@ -232,8 +232,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             await store.save()
             async_notify(
                 hass,
-                f"Batch {batch['id']} is ready to review. No purchase was made.",
-                title="Reorder — Scheduled Batch", notification_id=f"reorder_batch_{batch['id']}")
+                f"Order {batch['id']} is ready to review. No purchase was made.",
+                title="Reorder — Scheduled Order", notification_id=f"reorder_batch_{batch['id']}")
 
     unsub_batch = async_track_time_interval(hass, check_scheduled, timedelta(minutes=15))
     entry.async_on_unload(unsub_batch)

@@ -2,6 +2,20 @@
 
 Home Assistant custom integration for routing exact, preapproved shopping-list items to a persistent order queue, with **Zinc API submission (sandbox first)**.
 
+## v0.12.0: Cart editing and Orders
+
+The sidebar now uses **Cart** for local requests and **Orders** for saved groups ready
+for review or already submitted. Edit an unprepared Cart item's quantity and USD
+allowance, or remove it with confirmation. Catalog defaults and the Shopping List entry
+stay unchanged. Preparing an Order freezes its contents; stale/attempted edits are
+rejected, and local removals do not revive automatically. Confirmed delivery can show
+**Partially delivered**/**Delivered** without rewriting raw provider status.
+
+Notifications and helper text use the same names. Native action names, IDs, stored
+history and purchasing guards stay compatible. Schedules still prepare only; optional
+unattended ordering/budgets and notification grouping remain subsequent work. See
+[CART_AND_ORDERS.md](CART_AND_ORDERS.md) for the workflow and compatibility notes.
+
 ## v0.11.1: Quiet Shopping List reconciliation
 
 Routine 15-minute checks no longer report unchanged list items as edits or fill the
