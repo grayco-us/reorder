@@ -2,6 +2,15 @@
 
 Home Assistant custom integration for routing exact, preapproved shopping-list items to a persistent order queue, with **Zinc API submission (sandbox first)**.
 
+## v0.11.1: Quiet Shopping List reconciliation
+
+Routine 15-minute checks no longer report unchanged list items as edits or fill the
+activity history with identical blocked outcomes. Genuine name edits remain visible,
+and reconciliation still retries matching after catalog changes or cooldown expiry.
+Completed/submitted items stay protected, and unchanged checks do not save orders or
+send cart notifications. Activity is still bounded and clears on restart; existing
+configuration and storage are retained. Purchasing behavior is unchanged.
+
 ## v0.11.0: Tracking and guided recovery
 
 **Batches → Needs attention** brings together uncertain submissions, tracking/list

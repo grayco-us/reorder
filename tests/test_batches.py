@@ -733,7 +733,7 @@ class BatchActionsTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(panel.sidebar_title, "Reorder")
         self.assertTrue(panel.require_admin)
         self.assertEqual(panel.config["entry_id"], self.entry.entry_id)
-        self.assertEqual(panel.config["_panel_custom"]["module_url"], "/reorder-assets/reorder-panel.js?v=0.11.0")
+        self.assertEqual(panel.config["_panel_custom"]["module_url"], "/reorder-assets/reorder-panel.js?v=0.11.1")
         self.assertEqual(panel.config["_panel_custom"]["name"], "reorder-panel")
 
     async def test_sidebar_snapshot_excludes_credentials_and_preserves_data(self):
@@ -1235,9 +1235,10 @@ class BatchActionsTest(unittest.IsolatedAsyncioTestCase):
         await self.add_shopping_item("coffee")
         saved = self.coffee_orders()[0]
         await self.configure_coffee(enabled=False)
+        activity = deepcopy(self.engine.intake_events)
         await self.source_change(complete=False)
         self.assertEqual(saved["status"], "queued")
-        self.assertEqual(self.engine.intake_events[0]["reason"], "unchanged")
+        self.assertEqual(self.engine.intake_events, activity)
         self.transport.assert_not_awaited()
 
     async def test_reorder_list_event_does_not_change_orders(self):
@@ -2133,6 +2134,99 @@ class BatchActionsTest(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(snapshot["can_refresh"])
         self.assertFalse(snapshot["can_submit_live"])
         self.assertFalse(snapshot["can_submit_sandbox"])
+
+    async def test_repeated_reconciliation_does_not_report_unchanged_items_as_edits(self):
+        await self.configure_coffee()
+        await self.add_shopping_item("Coffee")
+        await self.prepare()
+        activity = deepcopy(self.engine.intake_events)
+        saved = deepcopy(self.engine.store.data)
+        with patch.object(self.engine.store, "save", AsyncMock()) as save:
+            for _ in range(12):
+                await self.engine.reconcile_shopping_list()
+            save.assert_not_awaited()
+        self.assertEqual(self.engine.intake_events, activity)
+        self.assertEqual(self.engine.store.data, saved)
+        self.transport.assert_not_awaited()
+
+    async def test_actual_same_product_alias_edit_is_visible_once(self):
+        await self.configure_coffee()
+        await self.add_shopping_item("Coffee")
+        await self.prepare()
+        await self.source_change(name="Morning brew")
+        self.assertEqual(self.engine.intake_events[0]["reason"], "unchanged")
+        self.assertEqual(self.coffee_orders()[0]["shopping_item_name"], "Morning brew")
+        activity = deepcopy(self.engine.intake_events)
+        for _ in range(4):
+            await self.engine.reconcile_shopping_list()
+        self.assertEqual(self.engine.intake_events, activity)
+        self.transport.assert_not_awaited()
+
+    async def test_reconciliation_deduplicates_blocked_results_but_retries_new_catalog_matches(self):
+        await self.add_shopping_item("Coffee")
+        self.assertEqual(self.engine.intake_events[0]["reason"], "no_match")
+        activity = deepcopy(self.engine.intake_events)
+        for _ in range(3):
+            await self.engine.reconcile_shopping_list()
+        self.assertEqual(self.engine.intake_events, activity)
+        await self.configure_coffee(enabled=False)
+        await self.engine.reconcile_shopping_list()
+        self.assertEqual(self.engine.intake_events[0]["reason"], "disabled")
+        count = len(self.engine.intake_events)
+        await self.engine.reconcile_shopping_list()
+        self.assertEqual(len(self.engine.intake_events), count)
+        await self.configure_coffee(enabled=True)
+        await self.engine.reconcile_shopping_list()
+        self.assertEqual(self.engine.intake_events[0]["reason"], "queued")
+        self.assertEqual(len(self.coffee_orders()), 1)
+        await self.engine.reconcile_shopping_list()
+        self.assertEqual(len(self.coffee_orders()), 1)
+        self.transport.assert_not_awaited()
+
+    async def test_quiet_reconciliation_still_queues_after_cooldown_expires(self):
+        from datetime import timedelta
+        from homeassistant.util import dt as dt_util
+        batch, previous = await self.delivered_coffee()
+        await self.call("refresh_batch_zinc", {"batch_id": batch["id"]})
+        await self.add_shopping_item("Coffee")
+        self.assertEqual(self.engine.intake_events[0]["reason"], "cooldown")
+        activity = deepcopy(self.engine.intake_events)
+        await self.engine.reconcile_shopping_list()
+        self.assertEqual(self.engine.intake_events, activity)
+        with patch("custom_components.reorder.core.dt_util.utcnow", return_value=dt_util.utcnow() + timedelta(days=8)):
+            await self.engine.reconcile_shopping_list()
+        self.assertEqual(len(self.coffee_orders()), 2)
+        self.assertEqual(self.engine.intake_events[0]["reason"], "queued")
+        self.assertEqual(sum(order["status"] == "queued" for order in self.coffee_orders()), 1)
+        self.assertEqual(sum(call.args[0] == "POST" for call in self.transport.await_args_list), 1)
+
+    async def test_unchanged_submitted_items_do_not_fill_activity_history(self):
+        await self.configure_coffee()
+        await self.add_shopping_item("Coffee")
+        batch = await self.prepare()
+        await self.submit(batch)
+        activity = deepcopy(self.engine.intake_events)
+        for _ in range(4):
+            await self.engine.reconcile_shopping_list()
+        self.assertEqual(self.engine.intake_events, activity)
+        # An actual submitted-source edit still explains why no retailer order changed.
+        await self.source_change(name="Different request")
+        self.assertEqual(self.engine.intake_events[0]["reason"], "submitted_unchanged")
+        activity = deepcopy(self.engine.intake_events)
+        await self.engine.reconcile_shopping_list()
+        self.assertEqual(self.engine.intake_events, activity)
+        self.assertEqual(self.coffee_orders()[0]["status"], "submitted")
+        self.transport.assert_awaited_once()
+
+    async def test_completed_items_stay_quiet_during_reconciliation(self):
+        batch, saved = await self.delivered_coffee()
+        await self.call("refresh_batch_zinc", {"batch_id": batch["id"]})
+        await self.hass.async_block_till_done()
+        activity = deepcopy(self.engine.intake_events)
+        await self.engine.reconcile_shopping_list()
+        self.assertEqual(self.engine.intake_events, activity)
+        self.assertTrue(self.hass.data["shopping_list"].items[-1]["complete"])
+        self.assertEqual(sum(call.args[0] == "POST" for call in self.transport.await_args_list), 1)
 
     async def test_missing_shipping_address_blocks_submission(self):
         batch = await self.prepare()
