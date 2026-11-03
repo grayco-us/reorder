@@ -113,3 +113,14 @@ by default, with an independent Settings switch for manual receipt. Completion u
 IDs and skips renamed/missing lines; partial failures remain open. Provider delivery or
 an explicit recorded receipt permits a fresh request only after cooldown, while the old
 source ID and attempted submission remain protected against replay.
+
+## Reconciliation activity (v0.11.1)
+
+Periodic checks still run every 15 minutes, but unchanged items are not presented as
+user edits. A real same-product name/alias edit appears as **Name updated**. Repeated
+periodic unmatched/disabled/blocked outcomes are shown once per source item until the
+outcome changes. Explicit source events remain explainable. Reconciliation continues
+to evaluate matches, catalog changes and cooldown expiry on every pass; it never skips
+those checks merely because the last result was already displayed. No-op checks do not
+change saved orders or reset activity timestamps. The bounded activity/deduplication
+state is in memory and resets on restart; no persistent storage migration is required.

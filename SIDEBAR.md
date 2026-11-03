@@ -1,4 +1,4 @@
-# Reorder sidebar app (v0.11.0)
+# Reorder sidebar app (v0.11.1)
 
 Reorder now bundles its own responsive frontend and automatically adds **Reorder**
 to Home Assistant's sidebar. There is no dashboard YAML to paste, no resource URL
@@ -174,3 +174,12 @@ Use **Needs attention** for guided recovery and per-line delivery/list outcomes.
 Manual refresh stays available with matching credentials even when live purchasing is
 off. See [RECOVERY.md](RECOVERY.md); no recovery control retries a purchase or clears
 uncertain submission history.
+
+## Quiet activity history (v0.11.1)
+
+The Queue activity panel shows meaningful changes and matching results. Routine
+unchanged reconciliation checks no longer add repeated **Same product** entries.
+Actual name edits show **Name updated**; repeated periodic blockers appear again when
+the result changes. Queue recovery, source synchronization and purchasing guards are
+unchanged. Restart Home Assistant after updating, then refresh the browser; the old
+per-run activity clears without deleting any configuration or order history.
